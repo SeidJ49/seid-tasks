@@ -1,93 +1,162 @@
-# hamdard_bm2cp
+# BM2CP
+[CoRL 2023] BM2CP: Efficient Collaborative Perception with LiDAR-Camera Modalities
+
+## Overview
+![Where2comm](./images/Workflow.png)
+**Abstract:** Collaborative perception enables agents to share complementary perceptual information with nearby agents. This can significantly benefit the perception performance and alleviate the issues of single-view perception, such as occlusion and sparsity. Most proposed approaches mainly focus on single modality (especially LiDAR), and not fully exploit the superiority of multi-modal perception. We propose an collaborative perception paradigm, BM2CP, which employs LiDAR and camera to achieve efficient multi-modal perception. BM2CP utilizes LiDAR-guided modal fusion, cooperative depth generation and modality-guided intermediate fusion to acquire deep interactions between modalities and agents. Moreover, it is capable to cope with the special case that one of the sensors is unavailable. Extensive experiments validate that it outperforms the state-of-the-art methods with 50X lower communication volumes in real-world autonomous driving scenarios.
 
 
+## Updates
+- 2024/04/29 Support BM2CP in OPV2V dataset.
+- 2024/03/12 Support How2comm(NeurIPS2023).
+- 2024/01/28 Support OPV2V dataset. Support SCOPE(ICCV2023). Fix bugs in fusion dataset that cause abnormal performance in presence of pose error. 
+- 2023/11/30 First version.
 
-## Getting started
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Features
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- Dataset Support
+  - [x] OPV2V
+  - [ ] V2XSet
+  - [ ] V2X-Sim 2.0
+  - [x] DAIR-V2X
 
-## Add your files
+- Spconv Support
+  - [x] 1.2.1
+  - [x] 2.x
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+- SOTA collaborative perception method support
+    - [x] Late Fusion
+    - [x] Early Fusion
+    - [x] [When2com (CVPR2020)](https://arxiv.org/abs/2006.00176)
+    - [x] [V2VNet (ECCV2020)](https://arxiv.org/abs/2008.07519)
+    - [x] [DiscoNet (NeurIPS2021)](https://arxiv.org/abs/2111.00643)
+    - [x] [V2X-ViT (ECCV2022)](https://arxiv.org/abs/2203.10638)
+    - [x] [CoBEVT (CoRL2022)](https://arxiv.org/abs/2207.02202)
+    - [x] [Where2comm (NeurIPS2022)](https://arxiv.org/abs/2209.12836)
+    - [x] [CoAlign (ICRA2023)](https://arxiv.org/abs/2211.07214)
+    - [x] [BM2CP (CoRL2023)](https://arxiv.org/abs/2310.14702)
+    - [x] [SCOPE (ICCV2023)](https://arxiv.org/abs/2307.13929)
+    - [x] [How2comm (NeurIPS2023)](https://openreview.net/pdf?id=Dbaxm9ujq6)
+
+- Visualization
+  - [x] BEV visualization
+  - [x] 3D visualization
+
+
+## Quick Start
+#### Download dataset 
+##### 1. OPV2V
+Download raw data of [OPV2V](https://drive.google.com/drive/folders/1dkDeHlwOVbmgXcDazZvO6TFEZ6V_7WUu) relseased by Official.
+##### 2. DAIR-V2X
+1. Download raw data of [DAIR-V2X](https://thudair.baai.ac.cn/cooptest).
+2. Download complemented annotation from [Yifan Lu](https://github.com/yifanlu0227/CoAlign).
+
+#### Install
+Please refer to the [INSTALL.md](./INSTALL.md) for detailed documentations. 
+
+
+#### Train your model
+First of all, modify the dataset path in the setting file, i.e. `xxx.yaml`.
+```
+data_dir: "{YOUR PATH}/DAIR-V2X-C/cooperative-vehicle-infrastructure"
+root_dir: "{YOUR PATH}/DAIR-V2X-C/cooperative-vehicle-infrastructure/train.json"
+validate_dir: "{YOUR PATH}/DAIR-V2X-C/cooperative-vehicle-infrastructure/val.json"
+test_dir: "{YOUR PATH}/DAIR-V2X-C/cooperative-vehicle-infrastructure/val.json"
+```
+
+The setting is same as OpenCOOD, which uses yaml file to configure all the parameters for training. To train your own model from scratch or a continued checkpoint, run the following commonds:
+```python
+python opencood/tools/train.py --hypes_yaml ${CONFIG_FILE} [--model_dir  ${CHECKPOINT_FOLDER}]
+```
+Arguments Explanation:
+- `hypes_yaml`: the path of the training configuration file, e.g. `opencood/hypes_yaml/second_early_fusion.yaml`, meaning you want to train
+an early fusion model which utilizes SECOND as the backbone. See [Tutorial 1: Config System](https://opencood.readthedocs.io/en/latest/md_files/config_tutorial.html) to learn more about the rules of the yaml files.
+- `model_dir` (optional) : the path of the checkpoints. This is used to fine-tune the trained models. When the `model_dir` is given, the trainer will discard the `hypes_yaml` and load the `config.yaml` in the checkpoint folder.
+
+For example, to train BM2CP from scratch:
+```
+python opencood/tools/train.py --hypes_yaml opencood/hypes_yaml/dair-v2x/dair_bm2cp.yaml
+```
+
+To train BM2CP from a checkpoint:
+```
+python opencood/tools/train.py --hypes_yaml opencood/hypes_yaml/dair-v2x/dair_bm2cp.yaml --model_dir opencood/logs/dair_bm2cp_2023_11_28_08_52_46
+```
+
+#### Test the model
+Before you run the following command, first make sure the `validation_dir` in config.yaml under your checkpoint folder
+refers to the testing dataset path, e.g. `opv2v_data_dumping/test`.
+
+```python
+python opencood/tools/inference.py --model_dir ${CHECKPOINT_FOLDER} --fusion_method ${FUSION_STRATEGY} --eval_epoch ${epoch_number} --save_vis ${default False}
+```
+Arguments Explanation:
+- `model_dir`: the path to your saved model.
+- `fusion_method`: indicate the fusion strategy, currently support 'early', 'late', 'intermediate', 'no'(indicate no fusion, single agent), 'intermediate_with_comm'(adopt intermediate fusion and output the communication cost).
+- `eval_epoch`: int. Choose to inferece which epoch.
+- `save_vis`: bool. Wether to save the visualization result.
+
+The evaluation results  will be dumped in the model directory.
+
+## Citation
+If you are using our project for your research, please cite the following paper:
 
 ```
-cd existing_repo
-git remote add origin https://ids-git.fzi.de/cc222/hamdard_bm2cp.git
-git branch -M main
-git push -uf origin main
+
+@InProceedings{zhao2023bm,
+  title = {BM2CP: Efficient Collaborative Perception with LiDAR-Camera Modalities},
+  author = {Zhao, Binyu and ZHANG, Wei and Zou, Zhaonian},
+  booktitle = {Proceedings of The 7th Conference on Robot Learning},
+  pages = {1022--1035},
+  year = {2023},
+  series = {Proceedings of Machine Learning Research},
+}
 ```
 
-## Integrate with your tools
+## Acknowledgements
+Thank for the excellent cooperative perception codebases [OpenCOOD](https://github.com/DerrickXuNu/OpenCOOD), [CoPerception](https://github.com/coperception/coperception) and [Where2comm](https://github.com/MediaBrain-SJTU/Where2comm).
 
-- [ ] [Set up project integrations](https://ids-git.fzi.de/cc222/hamdard_bm2cp/-/settings/integrations)
+Thank for the excellent cooperative perception datasets [DAIR-V2X](https://thudair.baai.ac.cn/index), [OPV2V](https://mobility-lab.seas.ucla.edu/opv2v/) and [V2X-SIM](https://ai4ce.github.io/V2X-Sim/).
 
-## Collaborate with your team
+Thank for the dataset and code support by [DerrickXu](https://github.com/DerrickXuNu), [Yue Hu](https://github.com/MediaBrain-SJTU) and [YiFan Lu](https://github.com/yifanlu0227).
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## Relevant Projects
 
-## Test and Deploy
+Thanks for the insightful previous works in cooperative perception field.
 
-Use the built-in continuous integration in GitLab.
+### Methods
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+**V2VNet: Vehicle-to-vehicle communication for joint perception and prediction** 
+*ECCV20* [[Paper]](https://arxiv.org/abs/2008.07519) 
 
-***
+**When2com: Multi-agent perception via communication graph grouping** 
+*CVPR20* [[Paper]](https://arxiv.org/abs/2006.00176) [[Code]](https://arxiv.org/abs/2006.00176)
 
-# Editing this README
+**Learning Distilled Collaboration Graph for Multi-Agent Perception** 
+*NeurIPS21* [[Paper]](https://arxiv.org/abs/2111.00643) [[Code]](https://github.com/DerrickXuNu/OpenCOOD)
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+**V2X-ViT: Vehicle-to-Everything Cooperative Perception with Vision Transformer** *ECCV2022* [[Paper]](https://arxiv.org/abs/2203.10638) [[Code]](https://github.com/DerrickXuNu/v2x-vit) [[Talk]](https://course.zhidx.com/c/MmQ1YWUyMzM1M2I3YzVlZjE1NzM=)
 
-## Suggestions for a good README
+**Self-Supervised Collaborative Scene Completion: Towards Task-Agnostic Multi-Robot Perception** 
+*CoRL2022* [[Paper]](https://openreview.net/forum?id=hW0tcXOJas2)
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+**CoBEVT: Cooperative Bird's Eye View Semantic Segmentation with Sparse Transformers** *CoRL2022* [[Paper]](https://arxiv.org/abs/2207.02202) [[Code]](https://github.com/DerrickXuNu/CoBEVT)
 
-## Name
-Choose a self-explaining name for your project.
+**Where2comm: Communication-Efficient Collaborative Perception via Spatial Confidence Maps** *NeurIPS2022* [[Paper]](https://arxiv.org/abs/2209.12836) [[Code]](https://github.com/MediaBrain-SJTU/Where2comm)
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+**Spatio-Temporal Domain Awareness for Multi-Agent Collaborative Perception** *ICCV2023* [[Paper]](https://arxiv.org/abs/2307.13929)[[Code]](https://github.com/starfdu1418/SCOPE)
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+**How2comm: Communication-Efficient and Collaboration-Pragmatic Multi-Agent Perceptio** *NeurIPS2023* [[Paper]](https://openreview.net/pdf?id=Dbaxm9ujq6) [[Code]](https://github.com/ydk122024/How2comm)
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+### Datasets
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+**OPV2V: An Open Benchmark Dataset and Fusion Pipeline for Perception with Vehicle-to-Vehicle Communication** 
+*ICRA2022* [[Paper]](https://arxiv.org/abs/2109.07644) [[Website]](https://mobility-lab.seas.ucla.edu/opv2v/) [[Code]](https://github.com/DerrickXuNu/OpenCOOD)
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+**V2X-Sim: A Virtual Collaborative Perception Dataset and Benchmark for Autonomous Driving** 
+*RAL21* [[Paper]](https://arxiv.org/abs/2111.00643) [[Website]](https://ai4ce.github.io/V2X-Sim/)[[Code]](https://github.com/ai4ce/V2X-Sim)
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+**DAIR-V2X: A Large-Scale Dataset for Vehicle-Infrastructure Cooperative 3D Object Detection** *CVPR2022* [[Paper]](https://arxiv.org/abs/2204.05575) [[Website]](https://thudair.baai.ac.cn/index) [[Code]](https://github.com/AIR-THU/DAIR-V2X)
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
