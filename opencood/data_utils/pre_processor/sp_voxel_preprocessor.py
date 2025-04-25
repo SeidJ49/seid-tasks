@@ -30,6 +30,7 @@ class SpVoxelPreprocessor(BasePreprocessor):
         self.lidar_range = self.params['cav_lidar_range']
         self.voxel_size = self.params['args']['voxel_size']
         self.max_points_per_voxel = self.params['args']['max_points_per_voxel']
+        self.num_point_features = self.params['args']['num_point_features']
 
         if train:
             self.max_voxels = self.params['args']['max_voxel_train']
@@ -53,7 +54,7 @@ class SpVoxelPreprocessor(BasePreprocessor):
                 vsize_xyz=self.voxel_size,
                 coors_range_xyz=self.lidar_range,
                 max_num_points_per_voxel=self.max_points_per_voxel,
-                num_point_features=4,
+                num_point_features=self.num_point_features,
                 max_num_voxels=self.max_voxels
             )
 
