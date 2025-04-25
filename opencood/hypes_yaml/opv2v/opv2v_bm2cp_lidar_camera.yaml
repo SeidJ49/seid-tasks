@@ -1,4 +1,4 @@
-name: opv2v_bm2cp_det
+name: opv2v_bm2cp_lidar_camera
 root_dir: '/mnt/data/byzhao/OPV2V/train'
 validate_dir: '/mnt/data/byzhao/OPV2V/validate'
 
