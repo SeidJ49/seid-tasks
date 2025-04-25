@@ -1,0 +1,10 @@
+# Ignore everything globally
+/*
+
+# Un-ignore the opencood folder
+!opencood/
+
+# Ignore specific folders within opencood
+opencood/logs/
+opencood/pcdet_utils/
+opencood/pypcd/
