@@ -1,4 +1,4 @@
-name: adver_city_bm2cp_radar_camera
+name: opv2v_bm2cp_radar_camera
 root_dir: '/home/ws-ids-es3-01/Developer/Dataset/ClearDay/train'
 validate_dir: '/home/ws-ids-es3-01/Developer/Dataset/ClearDay/validate'
 
@@ -26,12 +26,12 @@ wild_setting:
   backbone_delay: 10  # ms
 
 dataset:
-  # false = klassische Variante, true = dupliziere Szenarien für jeden Ego-Agenten
+  # false = classic variant, true = rotate ego role
   duplicate_ego: true
-  velocity_encoding: false # if true then we get an radar_np with ([x,y,z, v_rel_norm, v_abs_norm, v_abs_x_norm, v_abs_y_norm])
+  velocity_encoding: true # if true then we get an radar_np with ([x,y,z, v_rel_norm, v_abs_norm, v_abs_x_norm, v_abs_y_norm])
 
 fusion:
-  core_method: 'RadarCameraIntermediateFusionDatasetADVERCITY_V2'  # LateFusionDataset, EarlyFusionDataset, IntermediateFusionDataset supported
+  core_method: 'RadarCameraIntermediateFusionDatasetOPV2V_V2'  # LateFusionDataset, EarlyFusionDataset, IntermediateFusionDataset supported
   args:
     proj_first: &proj_first true
     clip_pc: false
@@ -44,10 +44,10 @@ fusion:
       mode: 'LID'
     data_aug_conf: &data_aug_conf
       resize_lim: [0.7, 0.8]
-      final_dim: [270, 480]
+      final_dim: [300, 400]
       rot_lim: [0, 0] #[-3.6, 3.6]
-      H: 1080
-      W: 1920
+      H: 600
+      W: 800
       rand_flip: False
       bot_pct_lim: [0.0, 0.20]
       cams: ['camera0', 'camera1', 'camera2', 'camera3']
@@ -62,6 +62,7 @@ preprocess:
     max_points_per_voxel: 32
     max_voxel_train: 32000
     max_voxel_test: 70000
+    num_point_features: 7 # if using veloicty otherwise 4
   # LiDAR range for each individual CAV
   cav_lidar_range: &cav_lidar [ -140.8, -38.4, -3, 140.8, 38.4, 1 ]
 
@@ -90,7 +91,7 @@ postprocess:
 
 # Model related
 model:
-  core_method: point_pillar_bm2cp_radar_camera
+  core_method: point_pillar_bm2cp_radar_camera # point_pillar_bm2cp_radar_camera_no_velo
 
   args:
     device: *device
@@ -118,7 +119,7 @@ model:
         use_norm: True
         with_distance: False
         use_absolute_xyz: True
-        use_velocity_branch: False
+        use_velocity_branch: True
         num_filters: [ 64 ]
       point_pillar_scatter:
         num_features: 64
