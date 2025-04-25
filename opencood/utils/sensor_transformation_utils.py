@@ -9,8 +9,6 @@ import bisect
 import numpy as np
 from matplotlib import cm
 
-from opencood.utils.opencda_carla import Transform
-
 VIRIDIS = np.array(cm.get_cmap('viridis').colors)
 VID_RANGE = np.linspace(0.0, 1.0, VIRIDIS.shape[0])
 
@@ -103,8 +101,13 @@ def project_lidar_to_camera(index, rgb_image, point_cloud, camera_intrinsic, ima
     # project the 3d points in camera space to image space
     points_2d = np.dot(K, point_in_camera_coords)
 
+    # Avoid division by zero by replacing zeros in the denominator
+    denominator = np.where(points_2d[2, :] == 0, 1e-9, points_2d[2, :])
+
     # normalize x,y,z
-    points_2d = np.array([points_2d[0, :] / points_2d[2, :], points_2d[1, :] / points_2d[2, :], points_2d[2, :]])
+    points_2d = np.array([points_2d[0, :] / denominator,
+                          points_2d[1, :] / denominator,
+                          points_2d[2, :]])
 
     # remove points out the camera scope
     points_2d = points_2d.T

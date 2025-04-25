@@ -3,6 +3,9 @@
 # Author: Runsheng Xu <rxx3386@ucla.edu>
 # License: TDG-Attribution-NonCommercial-NoDistrib
 
+from opencood.data_utils.datasets.adver_city.lidar_camera_intermediate_fusion_dataset_v2 import LiDARCameraIntermediateFusionDataset as LiDARCameraIntermediateFusionDatasetADVERCITY_V2
+from opencood.data_utils.datasets.adver_city.radar_camera_intermediate_fusion_dataset_v2 import RadarCameraIntermediateFusionDataset as RadarCameraIntermediateFusionDatasetADVERCITY_V2
+
 from opencood.data_utils.datasets.opv2v.early_fusion_dataset import EarlyFusionDataset as EarlyFusionDatasetOPV2V
 from opencood.data_utils.datasets.opv2v.intermediate_fusion_dataset import IntermediateFusionDataset as IntermediateFusionDatasetOPV2V
 from opencood.data_utils.datasets.opv2v.intermediate_fusion_dataset_v2 import IntermediateFusionDatasetV2 as IntermediateFusionDatasetOPV2V_V2
@@ -20,6 +23,10 @@ from opencood.data_utils.datasets.dair.lidar_camera_intermediate_fusion_dataset 
 from opencood.data_utils.datasets.dair.lidar_camera_intermediate_fusion_dataset_v2 import LiDARCameraIntermediateFusionDatasetDAIR as LiDARCameraIntermediateFusionDatasetDAIR_V2
 
 __all__ = {
+    'LiDARCameraIntermediateFusionDatasetADVERCITY_V2': LiDARCameraIntermediateFusionDatasetADVERCITY_V2,
+    'RadarCameraIntermediateFusionDatasetADVERCITY_V2': RadarCameraIntermediateFusionDatasetADVERCITY_V2,
+
+
     'EarlyFusionDatasetOPV2V': EarlyFusionDatasetOPV2V,
     'IntermediateFusionDatasetOPV2V': IntermediateFusionDatasetOPV2V,
     'IntermediateFusionDatasetOPV2V_V2': IntermediateFusionDatasetOPV2V_V2,
