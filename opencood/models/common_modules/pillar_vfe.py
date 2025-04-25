@@ -1,5 +1,11 @@
 """
-Pillar VFE, credits to OpenPCDet.
+Pillar VFE - Feature Encoding for Pillars.
+Original credits to OpenPCDet.
+
+This module includes:
+    - PFNLayer: A basic processing layer with optional normalization.
+    - PillarVFE: A voxel (pillar) feature encoder that processes input voxels
+      and aggregates point features into pillar features.
 """
 
 import torch
@@ -8,54 +14,70 @@ import torch.nn.functional as F
 
 
 class PFNLayer(nn.Module):
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 use_norm=True,
-                 last_layer=False):
+    """
+        Pillar Feature Network (PFN) layer.
+        Applies a linear transformation (with optional batch normalization)
+        and computes voxel-wise feature aggregation.
+    """
+    def __init__(self, in_channels, out_channels, use_norm=True, last_layer=False):
         super().__init__()
-
         self.last_vfe = last_layer
         self.use_norm = use_norm
+
+        # Halve the output channels for intermediate layers.
         if not self.last_vfe:
             out_channels = out_channels // 2
 
+        # Setup linear layer and optional batch norm.
         if self.use_norm:
             self.linear = nn.Linear(in_channels, out_channels, bias=False)
             self.norm = nn.BatchNorm1d(out_channels, eps=1e-3, momentum=0.01)
         else:
             self.linear = nn.Linear(in_channels, out_channels, bias=True)
 
+        # Partition size in case of very large batch inputs.
         self.part = 50000
 
     def forward(self, inputs):
+
+        # Process inputs in parts if batch size is very large to avoid performance issues
         if inputs.shape[0] > self.part:
-            # nn.Linear performs randomly when batch size is too large
             num_parts = inputs.shape[0] // self.part
-            part_linear_out = [self.linear(
-                inputs[num_part * self.part:(num_part + 1) * self.part])
-                for num_part in range(num_parts + 1)]
+            part_linear_out = [self.linear(inputs[num_part * self.part:(num_part + 1) * self.part]) for num_part in range(num_parts + 1)]
             x = torch.cat(part_linear_out, dim=0)
         else:
             x = self.linear(inputs)
+
+        # Disable cuDNN temporarily to prevent errors with BatchNorm on permuted tensors.
         torch.backends.cudnn.enabled = False
-        x = self.norm(x.permute(0, 2, 1)).permute(0, 2,
-                                                  1) if self.use_norm else x
+
+        # Apply batch normalization if enabled. Permute dimensions for BatchNorm1d
+        x = self.norm(x.permute(0, 2, 1)).permute(0, 2, 1) if self.use_norm else x
+
+        # Re-enable cuDNN after BatchNorm processing.
         torch.backends.cudnn.enabled = True
+
+        # Apply non-linearity (ReLU).
         x = F.relu(x)
+
+        # Aggregate features by taking the maximum along points dimension.
         x_max = torch.max(x, dim=1, keepdim=True)[0]
 
         if self.last_vfe:
             return x_max
         else:
+            # Concatenate point features with aggregated max features for enriched representation.
             x_repeat = x_max.repeat(1, inputs.shape[1], 1)
             x_concatenated = torch.cat([x, x_repeat], dim=2)
             return x_concatenated
 
 
 class PillarVFE(nn.Module):
-    def __init__(self, model_cfg, num_point_features, voxel_size,
-                 point_cloud_range):
+    """
+        Voxel (Pillar) feature encoder.
+        Processes input voxel features and outputs aggregated pillar features.
+    """
+    def __init__(self, model_cfg, num_point_features, voxel_size, point_cloud_range):
         super().__init__()
         self.model_cfg = model_cfg
 
