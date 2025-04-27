@@ -4,6 +4,7 @@
 # Un-ignore the opencood folder
 !opencood/
 !logreplay/
+!Debug/
 
 # Ignore specific folders within opencood
 opencood/logs/
