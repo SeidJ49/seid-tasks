@@ -1,5 +1,5 @@
 name: opv2v_bm2cp_radar_camera
-root_dir: '/home/ws-ids-es3-01/Developer/Dataset/Dataset_OPV2V/train'
+root_dir: '/home/ws-ids-es3-01/Developer/Dataset/Dataset_OPV2V/validate'
 validate_dir: '/home/ws-ids-es3-01/Developer/Dataset/Dataset_OPV2V/validate'
 
 yaml_parser: "load_cross_modal_point_pillar_params"

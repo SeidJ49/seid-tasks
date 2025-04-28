@@ -276,7 +276,10 @@ class RadarCameraIntermediateFusionDataset(torch.utils.data.Dataset):
                     yaml_files = sorted([os.path.join(cav_path, x) for x in os.listdir(cav_path) if x.endswith('.yaml') and 'additional' not in x])
                     timestamps = extract_timestamps(yaml_files)
 
-                    cav_path_additional = cav_path.replace("/Dataset_OPV2V/train/", "/Dataset_OPV2V/train_additional/")
+                    if train:
+                        cav_path_additional = cav_path.replace("/Dataset_OPV2V/train/", "/Dataset_OPV2V/train_additional/")
+                    else:
+                        cav_path_additional = cav_path.replace("/Dataset_OPV2V/validate/", "/Dataset_OPV2V/validate_additional/")
 
                     # Store data for each timestamp
                     for timestamp in timestamps:
