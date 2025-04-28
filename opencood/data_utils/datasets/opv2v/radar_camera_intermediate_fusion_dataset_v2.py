@@ -276,11 +276,17 @@ class RadarCameraIntermediateFusionDataset(torch.utils.data.Dataset):
                     yaml_files = sorted([os.path.join(cav_path, x) for x in os.listdir(cav_path) if x.endswith('.yaml') and 'additional' not in x])
                     timestamps = extract_timestamps(yaml_files)
 
+                    if train:
+                        cav_path_additional = cav_path.replace("/Dataset_OPV2V/train/", "/Dataset_OPV2V/train_additional/")
+                    else:
+                        cav_path_additional = cav_path.replace("/Dataset_OPV2V/validate/", "/Dataset_OPV2V/validate_additional/")
+
                     # Store data for each timestamp
                     for timestamp in timestamps:
                         self.scenario_database[scenario_counter][cav_id][timestamp] = OrderedDict()
                         self.scenario_database[scenario_counter][cav_id][timestamp]['yaml'] = os.path.join(cav_path, timestamp + '.yaml')
-                        self.scenario_database[scenario_counter][cav_id][timestamp]['radars'] = load_radar_files(cav_path, timestamp)
+                        self.scenario_database[scenario_counter][cav_id][timestamp]['yaml_additional'] = os.path.join(cav_path_additional, timestamp + '.yaml')
+                        self.scenario_database[scenario_counter][cav_id][timestamp]['radars'] = load_radar_files(cav_path_additional, timestamp)
                         self.scenario_database[scenario_counter][cav_id][timestamp]['camera'] = load_camera_files(cav_path, timestamp)
 
                     # Mark ego vehicle based on current ego_idx
@@ -602,12 +608,23 @@ class RadarCameraIntermediateFusionDataset(torch.utils.data.Dataset):
         # -- YAML --------------------------------------------------------------------------------------------------------------------------
 
         # EGO
+        # Ego Parameters with Merged Additional YAML
         cur_ego_params = load_yaml(ego_content[timestamp_cur]['yaml'])
-        delay_ego_params = load_yaml(ego_content[timestamp_delay]['yaml'])
+        cur_ego_params_additional = load_yaml(ego_content[timestamp_cur]['yaml_additional'])
+        cur_ego_params.update(cur_ego_params_additional)  # Merge additional into normal
 
-        # CAV
+        delay_ego_params = load_yaml(ego_content[timestamp_delay]['yaml'])
+        delay_ego_params_additional = load_yaml(ego_content[timestamp_delay]['yaml_additional'])
+        delay_ego_params.update(delay_ego_params_additional)  # Merge additional into normal
+
+        # CAV Parameters with Merged Additional YAML
         cur_cav_params = load_yaml(cav_content[timestamp_cur]['yaml'])
+        cur_cav_params_additional = load_yaml(cav_content[timestamp_cur]['yaml_additional'])
+        cur_cav_params.update(cur_cav_params_additional)  # Merge additional into normal
+
         delay_cav_params = load_yaml(cav_content[timestamp_delay]['yaml'])
+        delay_cav_params_additional = load_yaml(cav_content[timestamp_delay]['yaml_additional'])
+        delay_cav_params.update(delay_cav_params_additional)  # Merge additional into normal
 
         # -- LIDAR -------------------------------------------------------------------------------------------------------------------------
 
@@ -648,7 +665,7 @@ class RadarCameraIntermediateFusionDataset(torch.utils.data.Dataset):
         for idx in range(self.data_aug_conf['Ncams']):
             camera_id = self.data_aug_conf['cams'][idx]
 
-            extrinsic = delay_cav_params[camera_id]['extrinsic_lidar']
+            extrinsic = delay_cav_params[camera_id]['extrinsic']
             camera_to_lidar_matrix.append(extrinsic)
             camera_intrinsic.append(delay_cav_params[camera_id]['intrinsic'])
 
@@ -658,12 +675,12 @@ class RadarCameraIntermediateFusionDataset(torch.utils.data.Dataset):
         # -- RADAR -------------------------------------------------------------------------------------------------------------------------
 
         # EGO
-        delay_ego_radar_poses = [delay_ego_params[f'radar{i}']['cords'] for i in range(6)]
-        cur_ego_radar_poses = [cur_ego_params[f'radar{i}']['cords'] for i in range(6)]
+        delay_ego_radar_poses = [delay_ego_params[f'radar{i}'] for i in range(6)] # TODO: normally it should be radar cords but i made a mistake in logreplay
+        cur_ego_radar_poses = [cur_ego_params[f'radar{i}'] for i in range(6)]
 
         # CAV
-        delay_cav_radar_poses = [delay_cav_params[f'radar{i}']['cords'] for i in range(6)]
-        cur_cav_radar_poses = [cur_cav_params[f'radar{i}']['cords'] for i in range(6)]
+        delay_cav_radar_poses = [delay_cav_params[f'radar{i}'] for i in range(6)]
+        cur_cav_radar_poses = [cur_cav_params[f'radar{i}'] for i in range(6)]
 
         transformation_matrix_radar = []
         spatial_correction_matrix_radar = []
@@ -760,8 +777,10 @@ class RadarCameraIntermediateFusionDataset(torch.utils.data.Dataset):
             ego_vehicle_rotation = ego_vehicle_transform[3:]  # [roll, yaw, pitch]
 
             ego_vehicle_velocity = selected_cav_base['params']['ego_speed']  # in km/h
-            ego_vehicle_velocity_xyz = np.array(selected_cav_base['params']['ego_speed_x_y_z'])  # [vx, vy, vz] in m/s
+            #ego_vehicle_velocity_xyz = np.array(selected_cav_base['params']['ego_speed_x_y_z'])  # [vx, vy, vz] in m/s
 
+            # Calculate velocity in x, y, z coordinates
+            ego_vehicle_velocity_xyz = self.velocity_vector(ego_vehicle_velocity, selected_cav_base['params']['true_ego_pos'])
             # Convert ego velocity to sensor coordinates
             vx_sensor = ego_vehicle_velocity_xyz[0] * np.cos(np.radians(ego_vehicle_rotation[1])) + ego_vehicle_velocity_xyz[1] * np.sin(np.radians(ego_vehicle_rotation[1]))
             vy_sensor = -ego_vehicle_velocity_xyz[0] * np.sin(np.radians(ego_vehicle_rotation[1])) + ego_vehicle_velocity_xyz[1] * np.cos(np.radians(ego_vehicle_rotation[1]))
@@ -871,6 +890,36 @@ class RadarCameraIntermediateFusionDataset(torch.utils.data.Dataset):
              'velocity': velocity})
 
         return selected_cav_processed
+
+    @staticmethod
+    def velocity_vector(ego_speed_kmh: float, true_ego_pos: list) -> np.ndarray:
+        """
+        Compute the 2D velocity vector [vx, vy, vz] from ego speed and pose.
+
+        Parameters:
+        - ego_speed_kmh: float
+            Speed of the ego-vehicle in kilometers per hour.
+        - true_ego_pos: list or array-like
+            Pose of the ego-vehicle; must have at least 5 elements,
+            with yaw (radians) at index 4.
+
+        Returns:
+        - np.ndarray of shape (3,)
+            Velocity vector [vx, vy, vz] in meters per second.
+        """
+        # extract yaw, defaulting to 0 if not provided
+        yaw = float(true_ego_pos[4]) if len(true_ego_pos) > 4 else 0.0
+
+        # convert speed to m/s
+        speed_mps = ego_speed_kmh / 3.6
+
+        # compute components
+        vx = speed_mps * math.cos(yaw)
+        vy = speed_mps * math.sin(yaw)
+        vz = 0.0  # assume planar motion
+
+        return np.array([vx, vy, vz])
+
 
     @staticmethod
     def process_front_or_rear(radar_np, vx_sensor, vy_sensor):
