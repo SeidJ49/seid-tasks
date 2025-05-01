@@ -1,5 +1,5 @@
-root_dir: '/home/ws-ids-es3-01/Developer/Dataset/Dataset_OPV2V/validate' # your original opv2v dataset
-output_dir: '/home/ws-ids-es3-01/Developer/Dataset/Dataset_OPV2V/validate_additional' # the new folder to save the dumped new data
+root_dir: '/home/ws-ids-es3-01/Developer/Dataset/Dataset_OPV2V/train' # your original opv2v dataset
+output_dir: '/home/ws-ids-es3-01/Developer/Dataset/Dataset_OPV2V/train_additional' # the new folder to save the dumped new data
 map: # corresponding to bev map
   activate: false # whether activate HDMap module
   visualize: false # whether to visualize the BEV Map for each CAV
