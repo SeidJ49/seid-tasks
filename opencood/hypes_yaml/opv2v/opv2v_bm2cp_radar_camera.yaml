@@ -1,6 +1,6 @@
 name: opv2v_bm2cp_radar_camera
-root_dir: '/home/ws-ids-es3-01/Developer/Dataset/ClearDay/train'
-validate_dir: '/home/ws-ids-es3-01/Developer/Dataset/ClearDay/validate'
+root_dir: '/home/ws-ids-es3-01/Developer/Dataset/Dataset_OPV2V/validate'
+validate_dir: '/home/ws-ids-es3-01/Developer/Dataset/Dataset_OPV2V/validate'
 
 yaml_parser: "load_cross_modal_point_pillar_params"
 train_params:
@@ -27,7 +27,7 @@ wild_setting:
 
 dataset:
   # false = classic variant, true = rotate ego role
-  duplicate_ego: true
+  duplicate_ego: false
   velocity_encoding: true # if true then we get an radar_np with ([x,y,z, v_rel_norm, v_abs_norm, v_abs_x_norm, v_abs_y_norm])
 
 fusion:
