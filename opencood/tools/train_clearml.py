@@ -54,7 +54,7 @@ def main():
     opt = train_parser()
 
     # Initialize ClearML task
-    task = Task.init(project_name='bm2cp', task_name='orginal_radar_camera_bm2cp')
+    task = Task.init(project_name='bm2cp', task_name='adver_city_bm2cp_radar_camera')
     # Connect command-line arguments and hypes configuration to ClearML
     task.connect(vars(opt))
 
