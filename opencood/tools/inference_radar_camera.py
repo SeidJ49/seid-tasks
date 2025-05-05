@@ -64,13 +64,18 @@ def main():
         from opencood.utils import eval_utils_opv2v as eval_utils
         left_hand = True
 
+    elif 'adver_city' in opt.model_dir:
+        from opencood.utils import eval_utils_opv2v as eval_utils  # Use the same eval_utils as opv2v
+        left_hand = True  # Same behavior as opv2v
+
+
     elif 'dair' in opt.model_dir:
         from opencood.utils import eval_utils_where2comm as eval_utils
         hypes['validate_dir'] = hypes['test_dir']
         left_hand = False
 
     else:
-        print(f"The path should contain one of the following strings [opv2v|dair] .")
+        print(f"The path should contain one of the following strings [opv2v|adver_city|dair] .")
         return
 
     print(f"Left hand visualizing: {left_hand}")
