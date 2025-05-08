@@ -27,6 +27,7 @@ from opencood.data_utils.augmentor.data_augmentor import DataAugmentor
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.hypes_yaml.yaml_utils import load_yaml
 from opencood.utils import box_utils, pcd_utils, transformation_utils, camera_utils, sensor_transformation_utils
+from opencood.utils.transformation_utils import x1_to_x2
 
 matplotlib.use('Agg')
 
@@ -771,34 +772,30 @@ class RadarCameraIntermediateFusionDataset(torch.utils.data.Dataset):
         # ----------------------------------------------------------------------------------------------------------------------------------
 
         if self.velocity_encoding_flag:
-            # EGO_VEHICLE
-            ego_vehicle_transform = selected_cav_base['params']['lidar_pose']  # [x, y, z, roll, yaw, pitch]
-            ego_vehicle_location = ego_vehicle_transform[:3]  # [x, y, z]
-            ego_vehicle_rotation = ego_vehicle_transform[3:]  # [roll, yaw, pitch]
+            # Lidar_pose
+            lidar_transform = selected_cav_base['params']['lidar_pose']  # [x, y, z, roll, yaw, pitch]
+            # lidar_velocity_xyz = np.array(selected_cav_base['params']['ego_speed_x_y_z'])  # [vx, vy, vz] in m/
+            lidar_velocity_xyz = np.array([np.array(selected_cav_base['params']['ego_speed']) / 3.6, 0, 0])
 
-            ego_vehicle_velocity = selected_cav_base['params']['ego_speed']  # in km/h
-            #ego_vehicle_velocity_xyz = np.array(selected_cav_base['params']['ego_speed_x_y_z'])  # [vx, vy, vz] in m/s
-
-            # Calculate velocity in x, y, z coordinates
-            ego_vehicle_velocity_xyz = self.velocity_vector(ego_vehicle_velocity, selected_cav_base['params']['true_ego_pos'])
-            # Convert ego velocity to sensor coordinates
-            vx_sensor = ego_vehicle_velocity_xyz[0] * np.cos(np.radians(ego_vehicle_rotation[1])) + ego_vehicle_velocity_xyz[1] * np.sin(np.radians(ego_vehicle_rotation[1]))
-            vy_sensor = -ego_vehicle_velocity_xyz[0] * np.sin(np.radians(ego_vehicle_rotation[1])) + ego_vehicle_velocity_xyz[1] * np.cos(np.radians(ego_vehicle_rotation[1]))
-            vz_sensor = ego_vehicle_velocity_xyz[2]
-
-            # -- VELOCITY ENCODING PROCESSED ---------------------------------------------------------------------------------------------------
-            # [x,y,z, v_rel_norm, v_abs_norm, v_abs_x_norm, v_abs_y_norm]
-            selected_cav_base['radars_np'][0] = self.process_front_or_rear(selected_cav_base['radars_np'][0], vx_sensor,vy_sensor)  # FRONT
-            selected_cav_base['radars_np'][3] = self.process_front_or_rear(selected_cav_base['radars_np'][3], -vx_sensor, -vy_sensor)  # REAR
-
-            # REST WITH FLAGVALUE
-            for i in range(1, 6):
-                if i == 3:
-                    continue
-                selected_cav_base['radars_np'][i][:, 3] = 0.0
-                additional_colums = 0.0 * np.ones((selected_cav_base['radars_np'][i].shape[0], 3))
-                new_array = np.column_stack((selected_cav_base['radars_np'][i], additional_colums))
-                selected_cav_base['radars_np'][i] = new_array
+            # Velcocity Encoding for one Radar
+            selected_cav_base['radars_np'][0] = self.process_all_radar_velocity(selected_cav_base['radars_np'][0],
+                                                                                selected_cav_base['params']['radar0'],
+                                                                                lidar_velocity_xyz, lidar_transform)
+            selected_cav_base['radars_np'][1] = self.process_all_radar_velocity(selected_cav_base['radars_np'][1],
+                                                                                selected_cav_base['params']['radar1'],
+                                                                                lidar_velocity_xyz, lidar_transform)
+            selected_cav_base['radars_np'][2] = self.process_all_radar_velocity(selected_cav_base['radars_np'][2],
+                                                                                selected_cav_base['params']['radar2'],
+                                                                                lidar_velocity_xyz, lidar_transform)
+            selected_cav_base['radars_np'][3] = self.process_all_radar_velocity(selected_cav_base['radars_np'][3],
+                                                                                selected_cav_base['params']['radar3'],
+                                                                                lidar_velocity_xyz, lidar_transform)
+            selected_cav_base['radars_np'][4] = self.process_all_radar_velocity(selected_cav_base['radars_np'][4],
+                                                                                selected_cav_base['params']['radar4'],
+                                                                                lidar_velocity_xyz, lidar_transform)
+            selected_cav_base['radars_np'][5] = self.process_all_radar_velocity(selected_cav_base['radars_np'][5],
+                                                                                selected_cav_base['params']['radar5'],
+                                                                                lidar_velocity_xyz, lidar_transform)
 
         # ------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -920,6 +917,45 @@ class RadarCameraIntermediateFusionDataset(torch.utils.data.Dataset):
 
         return np.array([vx, vy, vz])
 
+    @staticmethod
+    def process_all_radar_velocity(radar_np, radar_transform, lidar_velocity_xyz, lidar_transform):
+
+        # Get the velocity of the radar sensor
+        l2r_transform = x1_to_x2(lidar_transform, radar_transform)
+
+        # Extract the roatation matrix (R) from 4 x 4 transform
+        l2r_rotation_matrix = l2r_transform[:3, :3]
+
+        radar_velocity_xyz = np.dot(l2r_rotation_matrix, lidar_velocity_xyz)
+
+        radar_np = radar_np.copy()  # [x, y, z, relative radial velocity (m/s]
+        v_rel = radar_np[:, 3]  # [v_rel]
+
+        # Calculate unit vectors for radar points
+        r = np.sqrt(radar_np[:, 0] ** 2 + radar_np[:, 1] ** 2)
+        r_safe = np.where(r == 0, 1, r)
+        ux = radar_np[:, 0] / r_safe
+        uy = radar_np[:, 1] / r_safe
+        uz = radar_np[:, 2] / r_safe
+
+        # Compute radial speed from ego motion and sum with relative velocity
+        v_ego_radial = radar_velocity_xyz[0] * ux + radar_velocity_xyz[1] * uy + radar_velocity_xyz[2] * uz
+        v_r = v_rel + v_ego_radial
+
+        # Decompose radial speed into x and y components
+        beta = np.arctan2(radar_np[:, 1], radar_np[:, 0])
+        v_r_x = np.cos(beta) * v_r
+        v_r_y = np.sin(beta) * v_r
+
+        # Normalize the computed velocities (clip to [-12.5, 12.5] and scale to [-1, 1])
+        v_rel_norm = np.clip(v_rel, -12.5, 12.5) / 12.5
+        v_r_norm = np.clip(v_r, -12.5, 12.5) / 12.5
+        v_r_x_norm = np.clip(v_r_x, -12.5, 12.5) / 12.5
+        v_r_y_norm = np.clip(v_r_y, -12.5, 12.5) / 12.5
+
+        result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel_norm, v_r_norm, v_r_x_norm, v_r_y_norm))
+
+        return result_np
 
     @staticmethod
     def process_front_or_rear(radar_np, vx_sensor, vy_sensor):

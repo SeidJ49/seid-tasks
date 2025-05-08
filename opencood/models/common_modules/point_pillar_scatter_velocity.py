@@ -95,7 +95,7 @@ class PointPillarScatter(nn.Module):
         batch_confidence_masks = batch_confidence_masks.view(batch_size, 1 * self.nz, self.ny, self.nx)
         batch_dict['velocity_confidence_mask'] = batch_confidence_masks
 
-        # save_tensor_images(batch_confidence_masks, "./saved_images", prefix="confidence_mask")
+        save_tensor_images(batch_confidence_masks, "./saved_images", prefix="confidence_mask")
 
         # --------------------------------------------NEW 15.04.2025 ---------------------------------------------------
 
@@ -112,10 +112,11 @@ from PIL import Image
 
 def save_tensor_images(tensor, folder, prefix="img"):
     """
-    Saves each image in a batch tensor as an image file in the specified folder.
+    Saves each image in a batch tensor as an image file in the specified folder,
+    with non-zero values highlighted in bright red in RGB mode.
 
     Args:
-        tensor (torch.Tensor): A tensor of shape (B, C, H, W) containing image data.
+        tensor (torch.Tensor): A tensor of shape (B, C, H, W) containing mask data.
         folder (str): Path to the folder where images will be saved.
         prefix (str): Prefix for the saved image filenames.
     """
@@ -130,17 +131,22 @@ def save_tensor_images(tensor, folder, prefix="img"):
     for i in range(batch_size):
         img_tensor = tensor[i]  # shape: (C, H, W)
 
+        # Ensure tensor is in (H, W) format for a single-channel mask
         if channels == 1:
-            img_array = img_tensor.squeeze(0).numpy()
-            img = Image.fromarray(np.uint8(img_array * 255), mode='L')
-        elif channels == 3:
-            img_array = img_tensor.permute(1, 2, 0).numpy()
-            img = Image.fromarray(np.uint8(img_array * 255), mode='RGB')
-        else:
-            # If channels are not 1 or 3, select the first three channels for an RGB image.
-            img_array = img_tensor[:3].permute(1, 2, 0).numpy()
-            img = Image.fromarray(np.uint8(img_array * 255), mode='RGB')
+            img_array = img_tensor.squeeze(0).numpy()  # shape: (H, W)
+            # Create an RGB image array initialized with zeros
+            rgb_array = np.zeros((height, width, 3), dtype=np.uint8)
 
+            # Apply bright red: Set red channel to 255 where values are not zero
+            non_zero_mask = img_array > 0
+            rgb_array[..., 0] = non_zero_mask * 255  # Red channel
+        else:
+            raise ValueError("This function only supports single-channel tensors (C=1) for brightness masking.")
+
+        # Convert the array to a PIL Image
+        img = Image.fromarray(rgb_array, mode='RGB')
+
+        # Save the image
         file_path = os.path.join(folder, f"{prefix}_{counter:03d}.png")
         img.save(file_path)
         print(f"Saved image: {file_path}")
