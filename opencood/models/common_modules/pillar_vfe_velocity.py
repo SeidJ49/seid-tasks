@@ -198,7 +198,11 @@ class PillarVFE(nn.Module):
             selected_velocity = torch.abs(velocity_feats[:, :, 1])  # use absolute value
             selected_velocity = torch.where((selected_velocity >= 0) & (selected_velocity <= 0.15), torch.tensor(0.0, dtype=selected_velocity.dtype, device=selected_velocity.device), selected_velocity)
             selected_velocity_mean = torch.max(selected_velocity, dim=1, keepdim=True)[0]
-            batch_dict['velocity_confidence'] = selected_velocity_mean
+            # Binary mask: 1 for positive values, 0 otherwise
+            binary_confidence_mask = (selected_velocity_mean > 0).float()
+
+            #batch_dict['velocity_confidence'] = selected_velocity_mean
+            batch_dict['velocity_confidence'] = binary_confidence_mask
             # --------------------------------------------NEW 15.04.2025 ---------------------------------------------------
 
             # Combine spatial (x, f_cluster, f_center) and processed velocity features.

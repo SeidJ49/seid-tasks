@@ -94,12 +94,14 @@ class MultiModalFusion(nn.Module):
 
         # Before
         #fused_voxel_before = fused_voxel.view(B, C * Z, Y, X)
+        #print(f"min: {torch.min(fused_voxel_before)}, max: {torch.max(fused_voxel_before)}, mean: {torch.mean(fused_voxel_before)}, std: {torch.std(fused_voxel_before)}")
         velocity_mask = velocity_mask.repeat(1, fused_voxel.size(1), fused_voxel.size(2), 1, 1)
 
-        gamma = 2.0  # adjust gamma based on the sensitivity of your data
-        fused_voxel = fused_voxel * (1 + gamma * velocity_mask)
+        gamma = 0.5  # adjust gamma based on the sensitivity of your data
+        fused_voxel = fused_voxel *  (1 + gamma * velocity_mask)
 
         #fused_voxel_after = fused_voxel.view(B, C * Z, Y, X)
+        #print(f"min: {torch.min(fused_voxel_after)}, max: {torch.max(fused_voxel_after)}, mean: {torch.mean(fused_voxel_after)}, std: {torch.std(fused_voxel_after)}")
         # --------------------------------------------NEW 15.04.2025 ---------------------------------------------------
 
         # Compute threshold maps and masks for further processing.
