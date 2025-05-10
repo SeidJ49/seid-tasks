@@ -52,14 +52,20 @@ class MultiModalFusion(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.img_fusion = ImgModalFusion(dim)
-
         self.multigate = nn.Conv3d(dim, dim, kernel_size=1, stride=1, padding=0)
         self.act = nn.ReLU(inplace=True)
         self.multifuse = nn.Conv3d(dim * 2, dim, 1, 1, 0)
 
+        # -------------------------------------------- NEW 10.05.2025 ----------------------------------------------------------------------
+        # how much to drop the threshold for "dynamic" cells
+        self.velocity_delta = 0.3
+        # -------------------------------------------- NEW 10.05.2025 ----------------------------------------------------------------------
+
+
     def forward(self, img_voxel, pc_dict):
         pc_voxel = pc_dict['spatial_features_3d']
         B, C, Z, Y, X = pc_voxel.shape
+
 
         # pc->pc; img->img*mask; pc+img->
         ones_mask = torch.ones_like(pc_voxel).to(pc_voxel.device)
@@ -69,9 +75,12 @@ class MultiModalFusion(nn.Module):
         pc_mask = torch.where(pc_voxel != 0, ones_mask, zeros_mask)
         pc_mask, _ = torch.max(pc_mask, dim=1)
         pc_mask = pc_mask.unsqueeze(1)
+
+
         img_mask = torch.where(img_voxel != 0, ones_mask, zeros_mask)
         img_mask, _ = torch.max(img_mask, dim=1)
         img_mask = img_mask.unsqueeze(1)
+
         # Overlap Region: Where both pc_mask and img_mask are 1.
             # Applies gating to pc features: gated_pc = self.act(self.multigate(pc_voxel))
             # Concatenates [gated_pc * img_voxel, pc_voxel] along the channel dimension (shape [B, 2C, Z, Y, X]). The first part represents an interaction term.
@@ -84,34 +93,32 @@ class MultiModalFusion(nn.Module):
             # Takes the original img_voxel features, gated by img_attn_mask, and multiplied by (1 - pc_mask) * img_mask.
         # Combine: Adds the features from the three regions (Overlap, PC-Only, Image-Only) together to get the initial fused_voxel.
         fused_voxel = pc_mask * img_mask * self.multifuse(torch.cat([self.act(self.multigate(pc_voxel)) * img_voxel, pc_voxel], dim=1))
+
+        # IMGMODALFUSION
         fused_voxel = fused_voxel + pc_voxel * pc_mask * (1 - img_mask) + img_voxel * self.img_fusion(img_voxel, pc_voxel) * (1 - pc_mask) * img_mask
-
-
-        # --------------------------------------------NEW 15.04.2025 ---------------------------------------------------
-        # Boost fused_voxel with the velocity confidence mask already in pc_dict.
+        # -------------------------------------------- NEW 10.05.2025 ----------------------------------------------------------------------
         velocity_mask = pc_dict['velocity_confidence_mask']  # shape: (B,1,Y,X)
         velocity_mask = velocity_mask.unsqueeze(2)  # now shape: (B,1,1,Y,X)
 
-        # Before
-        #fused_voxel_before = fused_voxel.view(B, C * Z, Y, X)
-        #print(f"min: {torch.min(fused_voxel_before)}, max: {torch.max(fused_voxel_before)}, mean: {torch.mean(fused_voxel_before)}, std: {torch.std(fused_voxel_before)}")
-        velocity_mask = velocity_mask.repeat(1, fused_voxel.size(1), fused_voxel.size(2), 1, 1)
+        # -------------------------------------------- NEW 10.05.2025 ----------------------------------------------------------------------
 
-        gamma = 0.5  # adjust gamma based on the sensitivity of your data
-        fused_voxel = fused_voxel *  (1 + gamma * velocity_mask)
-
-        #fused_voxel_after = fused_voxel.view(B, C * Z, Y, X)
-        #print(f"min: {torch.min(fused_voxel_after)}, max: {torch.max(fused_voxel_after)}, mean: {torch.mean(fused_voxel_after)}, std: {torch.std(fused_voxel_after)}")
-        # --------------------------------------------NEW 15.04.2025 ---------------------------------------------------
 
         # Compute threshold maps and masks for further processing.
-        thres_map = pc_mask * img_mask * 0 + pc_mask * (1 - img_mask) * 0.5 + (1 - pc_mask) * img_mask * 0.5 + (1 - pc_mask) * (
-                    1 - img_mask) * 0.5
+        thres_map = pc_mask * img_mask * 0 + pc_mask * (1 - img_mask) * 0.5 + (1 - pc_mask) * img_mask * 0.5 + (1 - pc_mask) * (1 - img_mask) * 0.5
+
+        # size = [B, 1, Z, Y, X]
+        thres_map, _ = torch.min(thres_map, dim=2)  # collapse Z-axis, dim=4 size = [B, 1, Y, X]
+
+        # -------------------------------------------- NEW 10.05.2025 ----------------------------------------------------------------------
+        thres_map = torch.clamp(thres_map - self.velocity_delta * velocity_mask.squeeze(2), min=0.0)
+        # -------------------------------------------- NEW 10.05.2025 ----------------------------------------------------------------------
+
+
         mask = pc_mask * img_mask + pc_mask * (1 - img_mask) * 2 + (1 - pc_mask) * img_mask * 3 + (1 - pc_mask) * (1 - img_mask) * 4
         mask1 = pc_mask
         mask2 = img_mask
-        # size = [B, 1, Z, Y, X]
-        thres_map, _ = torch.min(thres_map, dim=2)  # collapse Z-axis, dim=4 size = [B, 1, Y, X]
+
+
         mask1, _ = torch.max(mask1, dim=2)  # collapse Z-axis, dim=4 size = [B, 1, Y, X]
         mask2, _ = torch.max(mask2, dim=2)  # collapse Z-axis, dim=4 size = [B, 1, Y, X]
 

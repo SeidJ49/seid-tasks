@@ -95,7 +95,7 @@ class PointPillarScatter(nn.Module):
         batch_confidence_masks = batch_confidence_masks.view(batch_size, 1 * self.nz, self.ny, self.nx)
         batch_dict['velocity_confidence_mask'] = batch_confidence_masks
 
-        save_tensor_images(batch_confidence_masks, "./saved_images", prefix="confidence_mask")
+        #save_tensor_images(batch_confidence_masks, "./saved_images", prefix="confidence_mask")
 
         # --------------------------------------------NEW 15.04.2025 ---------------------------------------------------
 
