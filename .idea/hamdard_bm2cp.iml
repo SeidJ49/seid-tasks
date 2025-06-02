@@ -7,4 +7,8 @@
     <orderEntry type="jdk" jdkName="hamdard_bm2cp" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
+  <component name="PyDocumentationSettings">
+    <option name="format" value="NUMPY" />
+    <option name="myDocStringFormat" value="NumPy" />
+  </component>
 </module>
