@@ -1,0 +1,25 @@
+# ninja log v5
+1	1411	1748896377114051307	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/iou3d_nms/src/iou3d_nms_kernel.o	2309ba27350d4235
+1	10570	1748896386261917514	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/iou3d_nms/src/iou3d_cpu.o	69dfbc0b01c3efe7
+1	10839	1748896386537913477	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/iou3d_nms/src/iou3d_nms.o	8eb95427978f9cde
+1	12387	1748896388081890895	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/iou3d_nms/src/iou3d_nms_api.o	277efb5aa734577
+3	465	1748896388829879953	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/roiaware_pool3d/src/roiaware_pool3d_kernel.o	a95d334a83d53b5f
+3	11133	1748896399489724025	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/roiaware_pool3d/src/roiaware_pool3d.o	18202aadbb1034c4
+3	6576	1748896406317624140	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_stack/src/ball_query.o	5aa6a75a20d861d0
+4	6914	1748896406657619166	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_stack/src/sampling.o	dbcbe748f9ccd98e
+4	6929	1748896406669618991	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_stack/src/group_points.o	f9b11ab3e10eacdc
+4	9230	1748896408973585284	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_stack/src/interpolate.o	5756c68fbfa42870
+4	15305	1748896415049496392	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_stack/src/pointnet2_api.o	ea9047390a8edf2e
+4	20579	1748896420325419199	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_stack/src/group_points_gpu.o	fc0224bf5bd9e166
+3	20994	1748896420741413112	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_stack/src/ball_query_gpu.o	37e522ae1fb4c99e
+5	21237	1748896420981409601	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_stack/src/sampling_gpu.o	25427ff05a3be2d3
+4	22098	1748896421845396961	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_stack/src/interpolate_gpu.o	4c654a616be519d6
+4	6950	1748896429105290731	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_batch/src/interpolate.o	b9a4b3621d41320b
+3	7085	1748896429241288741	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_batch/src/group_points.o	ffb01959e72db665
+3	7197	1748896429353287102	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_batch/src/ball_query.o	23f098ca8003e53d
+4	8977	1748896431133261056	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_batch/src/sampling.o	4a46d713e0539b1c
+4	15506	1748896437661165530	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_batch/src/pointnet2_api.o	6b496cfdd426d8c4
+3	20476	1748896442637092711	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_batch/src/ball_query_gpu.o	8fd6e9d59dd612d
+4	20800	1748896442961087968	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_batch/src/group_points_gpu.o	d8bb05ff151d4b91
+4	21105	1748896443265083520	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_batch/src/sampling_gpu.o	40b4fd5936b8a3b9
+4	21744	1748896443905074154	/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/build/temp.linux-x86_64-cpython-37/opencood/pcdet_utils/pointnet2/pointnet2_batch/src/interpolate_gpu.o	8f39b7051f87326c
