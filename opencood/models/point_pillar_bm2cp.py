@@ -207,7 +207,7 @@ class PointPillarBM2CP(nn.Module):
     def forward(self, data_dict):   # loss: 5.91->0.76
         # get two types data
         image_inputs_dict = data_dict['image_inputs']
-        pc_inputs_dict = data_dict['processed_radar']
+        pc_inputs_dict = data_dict['processed_lidar']
         record_len = data_dict['record_len']
 
         batch_dict = {'voxel_features': pc_inputs_dict['voxel_features'],
@@ -217,8 +217,8 @@ class PointPillarBM2CP(nn.Module):
         batch_dict = self.pillar_vfe(batch_dict)
         batch_dict = self.scatter(batch_dict)
         # batch_dict = self.backbone(batch_dict)
-        # spatial_features_2d = batch_dict['spatial_features_2d'] 
-        
+        # spatial_features_2d = batch_dict['spatial_features_2d']
+
         # process image to get bev
         # x, rots, trans, intrins, post_rots, post_trans, depth_map = image_inputs_dict['imgs'], image_inputs_dict['rots'], image_inputs_dict['trans'], image_inputs_dict['intrins'], image_inputs_dict['post_rots'], image_inputs_dict['post_trans'], image_inputs_dict['depth_map']
         # geom: ([8, 1, 48, 40, 60, 3]), x: torch.Size([8, 1, 48, 40, 60, 64])
@@ -235,7 +235,7 @@ class PointPillarBM2CP(nn.Module):
         x = self.voxel_pooling(geom, x)  # x: 4 x 64 x 240 x 240
         # collapse Z
         # x = torch.cat(x.unbind(dim=2), 1)
-        
+
         # modal fusion in voxel space. img: B*C*Z*Y*X; pc: B*C*Z*Y*X
         batch_dict, thres_map, mask, each_mask = self.fusion(x, batch_dict)
         batch_dict = self.backbone(batch_dict)
@@ -248,14 +248,14 @@ class PointPillarBM2CP(nn.Module):
 
         # collaborative fusion
         pairwise_t_matrix = data_dict['pairwise_t_matrix']
-        
+
         if self.multi_scale:
             fused_feature, communication_rates, result_dict = self.fusion_net(
                                             batch_dict['spatial_features'],
                                             self.cls_head(spatial_features_2d),
                                             thres_map,
                                             record_len,
-                                            pairwise_t_matrix, 
+                                            pairwise_t_matrix,
                                             self.backbone,
                                             [self.shrink_conv, self.cls_head, self.reg_head])
             # downsample feature to reduce memory
@@ -268,7 +268,7 @@ class PointPillarBM2CP(nn.Module):
                                             thres_map,
                                             record_len,
                                             pairwise_t_matrix)
-        
+
         # decode head
         psm = self.cls_head(fused_feature)
         rm = self.reg_head(fused_feature)
@@ -297,7 +297,7 @@ class PointPillarBM2CP(nn.Module):
         psm_single_i = []
         rm_single_v = []
         rm_single_i = []
-        
+
         for b in range(len(split_psm_single)):
             psm_single_v.append(split_psm_single[b][0:1])
             psm_single_i.append(split_psm_single[b][1:2])
@@ -314,7 +314,7 @@ class PointPillarBM2CP(nn.Module):
                        'mask': mask,
                        'comm_rate': communication_rates
                        })
-        
+
         return output_dict
 
     def get_geometry(self, image_inputs_dict):
@@ -339,12 +339,12 @@ class PointPillarBM2CP(nn.Module):
         # cam_to_ego
         points = torch.cat((points[:, :, :, :, :, :2] * points[:, :, :, :, :, 2:3],  # points[:, :, :, :, :, 2:3] ranges from [4, 45) meters
                             points[:, :, :, :, :, 2:3]), 5)
-        
+
         if intrins.device != 'cpu':
             inv_intrins = torch.inverse(intrins.to('cpu')).to(intrins.device)
         else:
             inv_intrins = torch.inverse(intrins)
-        
+
         combine = rots.matmul(inv_intrins)
         points = combine.view(B, N, 1, 1, 1, 3, 3).matmul(points).squeeze(-1)
         points += trans.view(B, N, 1, 1, 1, 3)
@@ -371,8 +371,8 @@ class PointPillarBM2CP(nn.Module):
         kept = (geom_feats[:, 0] >= 0) & (geom_feats[:, 0] < self.nx[0])\
             & (geom_feats[:, 1] >= 0) & (geom_feats[:, 1] < self.nx[1])\
             & (geom_feats[:, 2] >= 0) & (geom_feats[:, 2] < self.nx[2])
-        
-        x = x[kept] 
+
+        x = x[kept]
         geom_feats = geom_feats[kept]
 
         # get tensors from the same voxel next to each other

@@ -244,7 +244,7 @@ class LiDARCameraIntermediateFusionDataset(torch.utils.data.Dataset):
                     # yaml_file, lidar_file, camera_files
                     self.scenario_database[i][cav_id][timestamp] = OrderedDict()
                     self.scenario_database[i][cav_id][timestamp]['yaml'] = os.path.join(cav_path, timestamp + '.yaml')
-                    self.scenario_database[i][cav_id][timestamp]['lidar'] = os.path.join(cav_path, timestamp + '.pcd')
+                    self.scenario_database[i][cav_id][timestamp]['lidar'] = os.path.join(cav_path, timestamp + '_lidar.npy')
                     self.scenario_database[i][cav_id][timestamp]['camera'] = load_camera_files(cav_path, timestamp)
                 # Assume all cavs will have the same timestamps length. Thus we only need to calculate for the first vehicle in the scene.
                 if j == 0:
@@ -271,7 +271,7 @@ class LiDARCameraIntermediateFusionDataset(torch.utils.data.Dataset):
         for cav_id, cav_content in base_data_dict.items():
             if cav_content['ego']:
                 ego_id = cav_id
-                ego_lidar_pose = cav_content['params']['lidar_pose']
+                ego_lidar_pose = cav_content['params']['lidar']['cords']
                 break
         assert cav_id == list(base_data_dict.keys())[0], "The first element in the OrderedDict must be ego"
         assert ego_id != -1
@@ -298,8 +298,8 @@ class LiDARCameraIntermediateFusionDataset(torch.utils.data.Dataset):
         # loop over all CAVs to process information
         for cav_id, selected_cav_base in base_data_dict.items():
             # check if the cav is within the communication range with ego
-            distance = math.sqrt((selected_cav_base['params']['lidar_pose'][0] - ego_lidar_pose[0]) ** 2 + 
-                                 (selected_cav_base['params']['lidar_pose'][1] - ego_lidar_pose[1]) ** 2)
+            distance = math.sqrt((selected_cav_base['params']['lidar']['cords'][0] - ego_lidar_pose[0]) ** 2 +
+                                 (selected_cav_base['params']['lidar']['cords'][1] - ego_lidar_pose[1]) ** 2)
             if distance > opencood.data_utils.datasets.COM_RANGE:
                 continue
 
@@ -318,7 +318,7 @@ class LiDARCameraIntermediateFusionDataset(torch.utils.data.Dataset):
             spatial_correction_matrix.append(selected_cav_base['params']['spatial_correction_matrix'])
             infra.append(1 if int(cav_id) < 0 else 0)
 
-            lidar_pose.append(selected_cav_base['params']['lidar_pose'])
+            lidar_pose.append(selected_cav_base['params']['lidar']['cords'])
             if ego_id == cav_id:
                 ego_flag.append(True)
             else:
@@ -437,7 +437,7 @@ class LiDARCameraIntermediateFusionDataset(torch.utils.data.Dataset):
             data[cav_id]['time_delay'] = timestamp_delay
             # load the corresponding data into the dictionary
             data[cav_id]['params'] = self.reform_param(cav_content, ego_cav_content, timestamp_key, timestamp_key_delay, cur_ego_pose_flag)
-            data[cav_id]['lidar_np'] = pcd_utils.pcd_to_np(cav_content[timestamp_key_delay]['lidar'])
+            data[cav_id]['lidar_np'] = np.load(cav_content[timestamp_key_delay]['lidar'])
             img_src = []
             for idx in range(self.data_aug_conf['Ncams']):
                 image_path = cav_content[timestamp_key_delay]['camera'][idx]
@@ -455,13 +455,13 @@ class LiDARCameraIntermediateFusionDataset(torch.utils.data.Dataset):
         for cav_id, cav_content in scenario_database.items():
             if cav_content['ego']:
                 ego_cav_content = cav_content
-                ego_lidar_pose = load_yaml(cav_content[timestamp_key]['yaml'])['lidar_pose']
+                ego_lidar_pose = load_yaml(cav_content[timestamp_key]['yaml'])['lidar']['cords']
                 break
         assert ego_lidar_pose is not None
 
         # calculate the distance
         for cav_id, cav_content in scenario_database.items():
-            cur_lidar_pose = load_yaml(cav_content[timestamp_key]['yaml'])['lidar_pose']
+            cur_lidar_pose = load_yaml(cav_content[timestamp_key]['yaml'])['lidar']['cords']
             distance = math.sqrt((cur_lidar_pose[0] - ego_lidar_pose[0]) ** 2 + (cur_lidar_pose[1] - ego_lidar_pose[1]) ** 2)
             cav_content['distance_to_ego'] = distance
             scenario_database.update({cav_id: cav_content})
@@ -559,11 +559,11 @@ class LiDARCameraIntermediateFusionDataset(torch.utils.data.Dataset):
 
         # we need to calculate the transformation matrix from cav to ego
         # at the delayed timestamp
-        delay_cav_lidar_pose = delay_params['lidar_pose']
-        delay_ego_lidar_pose = delay_ego_params["lidar_pose"]
+        delay_cav_lidar_pose = delay_params['lidar']['cords']
+        delay_ego_lidar_pose = delay_ego_params['lidar']['cords']
 
-        cur_ego_lidar_pose = cur_ego_params['lidar_pose']
-        cur_cav_lidar_pose = cur_params['lidar_pose']
+        cur_ego_lidar_pose = cur_ego_params['lidar']['cords']
+        cur_cav_lidar_pose = cur_params['lidar']['cords']
 
         if not cav_content['ego'] and self.loc_err_flag:
             delay_cav_lidar_pose = self.add_loc_noise(delay_cav_lidar_pose, self.xyz_noise_std, self.ryp_noise_std)
@@ -590,9 +590,9 @@ class LiDARCameraIntermediateFusionDataset(torch.utils.data.Dataset):
             camera_id = self.data_aug_conf['cams'][idx]
 
             camera_pos = delay_params[camera_id]['cords']
-            lidar_pose = delay_params['lidar_pose']
+            lidar_pose = delay_params['lidar']['cords']
             camera2lidar = transformation_utils.x1_to_x2(camera_pos, lidar_pose)
-            extrinsic = delay_params[camera_id]['extrinsic']
+            extrinsic = delay_params[camera_id]['extrinsic_lidar']
             # print(camera2lidar, extrinsic)
             # camera_to_lidar_matrix.append(delay_params[camera_id]['extrinsic'])
             camera_to_lidar_matrix.append(extrinsic)
