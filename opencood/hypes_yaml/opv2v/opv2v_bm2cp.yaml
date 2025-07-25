@@ -1,10 +1,10 @@
 name: opv2v_bm2cp_det
-root_dir: '/mnt/data/byzhao/OPV2V/train'
-validate_dir: '/mnt/data/byzhao/OPV2V/validate'
+root_dir: '/data/Adver-City_Dataset_new/Dataset/test_adverse/ui_test'
+validate_dir: '/data/Adver-City_Dataset_new/Dataset/test_adverse/ui_test'
 
 yaml_parser: "load_cross_modal_point_pillar_params"
 train_params:
-  batch_size: &batch_size 1
+  batch_size: &batch_size 2
   epoches: &epoches 50
   eval_freq: 1
   save_freq: 1
