@@ -244,7 +244,7 @@ class LiDARCameraIntermediateFusionDataset(torch.utils.data.Dataset):
                     # yaml_file, lidar_file, camera_files
                     self.scenario_database[i][cav_id][timestamp] = OrderedDict()
                     self.scenario_database[i][cav_id][timestamp]['yaml'] = os.path.join(cav_path, timestamp + '.yaml')
-                    self.scenario_database[i][cav_id][timestamp]['lidar'] = os.path.join(cav_path, timestamp + '.pcd')
+                    self.scenario_database[i][cav_id][timestamp]['lidar'] = os.path.join(cav_path, timestamp + '_lidar.npy')
                     self.scenario_database[i][cav_id][timestamp]['camera'] = load_camera_files(cav_path, timestamp)
                 # Assume all cavs will have the same timestamps length. Thus we only need to calculate for the first vehicle in the scene.
                 if j == 0:
