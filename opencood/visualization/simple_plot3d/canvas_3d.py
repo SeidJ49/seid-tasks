@@ -13,13 +13,13 @@ import matplotlib
 
 class Canvas_3D(object):
     def __init__(self,
-                 canvas_shape=(500, 1000),
-                 camera_center_coords=(-15, 0, 10),
-                 camera_focus_coords=(-15 + 0.9396926, 0, 10 - 0.44202014),
+                 canvas_shape=(600, 800),
+                 camera_center_coords = (0.45, 0.0, 1.45),
+                 camera_focus_coords  = (10.45, 0.0, 1.45) ,
                 #  camera_center_coords=(-25, 0, 20),
                 #  camera_focus_coords=(-25 + 0.9396926, 0, 20 - 0.64202014),
                  focal_length=None,
-                 canvas_bg_color=(255, 255, 255), 
+                 canvas_bg_color=(0, 0, 0),
                  left_hand=True):
         """
         Args:
@@ -127,8 +127,8 @@ class Canvas_3D(object):
     def draw_canvas_points(self, 
                            canvas_xy,
                            radius=-1,
-                           # colors=None,
-                           colors=(128,64,0),
+                           colors=None,
+                           # colors=(255,255,255),
                            colors_operand=None):
         """
         Draws canvas_xy onto self.canvas.

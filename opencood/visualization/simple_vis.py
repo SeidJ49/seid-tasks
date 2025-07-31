@@ -111,6 +111,6 @@ def visualize(pred_box_tensor, gt_tensor, pcd, pc_range, save_path, method='3d',
         plt.imshow(canvas.canvas)
 
         plt.tight_layout()
-        plt.savefig(save_path, transparent=False, dpi=400)
+        plt.savefig(save_path, transparent=True, dpi=1200)
         plt.clf()
         plt.close()
