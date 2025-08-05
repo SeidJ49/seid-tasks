@@ -261,8 +261,8 @@ class Canvas_BEV_heading_right(object):
                  canvas_shape=(800, 2800),
                  canvas_x_range=(-140, 140),
                  canvas_y_range=(-40, 40),
-                 canvas_bg_color=(0, 0, 0),
-                 #canvas_bg_color=(255, 255, 255),
+                 #canvas_bg_color=(0, 0, 0),
+                 canvas_bg_color=(255, 255, 255),
                  left_hand=True):
         """
         Args:
@@ -360,9 +360,9 @@ class Canvas_BEV_heading_right(object):
 
     def draw_canvas_points(self, 
                            canvas_xy,
-                           radius=-1,
-                           colors=None,
-                           # colors=(128,64,0), # 棕色 # (245,222,179):wheat 小麦色
+                           radius= 1,
+                           # colors=None,
+                           colors=(0,150,130), # 棕色 # (245,222,179):wheat 小麦色
                            colors_operand=None):
         """
         Draws canvas_xy onto self.canvas.

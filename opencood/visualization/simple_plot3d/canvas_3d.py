@@ -19,7 +19,7 @@ class Canvas_3D(object):
                 #  camera_center_coords=(-25, 0, 20),
                 #  camera_focus_coords=(-25 + 0.9396926, 0, 20 - 0.64202014),
                  focal_length=None,
-                 canvas_bg_color=(0, 0, 0),
+                 canvas_bg_color=(255, 255, 255),
                  left_hand=True):
         """
         Args:
@@ -126,9 +126,9 @@ class Canvas_3D(object):
 
     def draw_canvas_points(self, 
                            canvas_xy,
-                           radius=-1,
-                           colors=None,
-                           # colors=(255,255,255),
+                           radius=1,
+                           # colors=None,
+                           colors=(0,150,130),
                            colors_operand=None):
         """
         Draws canvas_xy onto self.canvas.

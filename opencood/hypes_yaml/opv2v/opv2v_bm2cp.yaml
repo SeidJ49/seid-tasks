@@ -1,10 +1,10 @@
 name: opv2v_bm2cp_det
-root_dir: '/data/Adver-City_Dataset_new/Dataset/test_adverse/ui_test'
-validate_dir: '/data/Adver-City_Dataset_new/Dataset/test_adverse/ui_test'
+root_dir: '/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetAdverCity/Data/test/c'
+validate_dir: '/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetAdverCity/Data/test/c'
 
 yaml_parser: "load_cross_modal_point_pillar_params"
 train_params:
-  batch_size: &batch_size 2
+  batch_size: &batch_size 1
   epoches: &epoches 50
   eval_freq: 1
   save_freq: 1
@@ -41,8 +41,8 @@ fusion:
       resize_lim: [0.7, 0.8]
       final_dim: [300, 400]
       rot_lim: [0, 0] #[-3.6, 3.6]
-      H: 600
-      W: 800
+      H: 60
+      W: 80
       rand_flip: False
       bot_pct_lim: [0.0, 0.20]
       cams: ['camera0', 'camera1', 'camera2', 'camera3']
