@@ -1,0 +1,9 @@
+# Ignore everything at the root
+/*
+
+# Allow opencood folder and its contents
+!/opencood/
+!/opencood/**
+
+# Ignore logs folder inside opencood
+/opencood/logs/
