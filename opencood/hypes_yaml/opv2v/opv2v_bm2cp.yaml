@@ -1,6 +1,6 @@
 name: opv2v_bm2cp_det
-root_dir: '/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetAdverCity/Data/test/c'
-validate_dir: '/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetAdverCity/Data/test/c'
+root_dir: '/mnt/data/byzhao/OPV2V/train'
+validate_dir: '/mnt/data/byzhao/OPV2V/validate'
 
 yaml_parser: "load_cross_modal_point_pillar_params"
 train_params:
@@ -41,8 +41,8 @@ fusion:
       resize_lim: [0.7, 0.8]
       final_dim: [300, 400]
       rot_lim: [0, 0] #[-3.6, 3.6]
-      H: 60
-      W: 80
+      H: 600
+      W: 800
       rand_flip: False
       bot_pct_lim: [0.0, 0.20]
       cams: ['camera0', 'camera1', 'camera2', 'camera3']

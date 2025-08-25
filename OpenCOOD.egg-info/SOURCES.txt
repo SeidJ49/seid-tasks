@@ -81,7 +81,7 @@ opencood/utils/max_consensus.py
 opencood/utils/model_utils.py
 opencood/utils/pcd_utils.py
 opencood/utils/pose_utils.py
-opencood/utils/sensor_transformation_utils.py.py
+opencood/utils/sensor_transformation_utils.py
 opencood/utils/setup.py
 opencood/utils/subsampling_utils.py
 opencood/utils/transformation_utils.py

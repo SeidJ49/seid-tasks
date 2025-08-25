@@ -204,7 +204,7 @@ def main():
                 vis_save_path = os.path.join(opt.model_dir, 'vis_3d/3d_%05d.png' % i)
                 simple_vis.visualize(pred_box_tensor, gt_box_tensor, batch_data['ego']['origin_lidar'][0], 
                                      hypes['preprocess']['cav_lidar_range'], # hypes['postprocess']['gt_range'], 
-                                     vis_save_path, method='3d', left_hand=left_hand, vis_pred_box=False, vis_gt_box=False)
+                                     vis_save_path, method='3d', left_hand=left_hand, vis_pred_box=True, vis_gt_box = True)
                 
                 vis_save_path = os.path.join(opt.model_dir, 'vis_bev')
                 if not os.path.exists(vis_save_path):
@@ -212,7 +212,7 @@ def main():
                 vis_save_path = os.path.join(opt.model_dir, 'vis_bev/bev_%05d.png' % i)
                 simple_vis.visualize(pred_box_tensor, gt_box_tensor, batch_data['ego']['origin_lidar'][0],
                                      hypes['preprocess']['cav_lidar_range'], # hypes['postprocess']['gt_range'], 
-                                     vis_save_path, method='bev', left_hand=left_hand, vis_pred_box=False, vis_gt_box=False)
+                                     vis_save_path, method='bev', left_hand=left_hand, vis_pred_box=True, vis_gt_box = True)
                 """
                 
                 if opt.fusion_method == 'intermediate_with_comm':
