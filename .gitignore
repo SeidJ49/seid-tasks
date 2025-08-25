@@ -1,12 +1,20 @@
+# Ignore everything at the root
+/*
+
+# Allow project sources and local runner scripts
+!/opencood/
+!/opencood/**
+!/run_tests.sh
+!/run_tests-fog.sh
+
+# Generated/build artifacts
 /build/
 /OpenCOOD.egg-info/
 /opencood/logs/
-/build/
 /pypcd/
 lidar_spatial_features/
 psm/
 radar_spatial_features/
-radar_spatial_features
 rm/
 logs/
 *.so
@@ -14,5 +22,4 @@ logs/
 __pycache__/
 build/
 *.egg-info/
-logs/
 outputs/
