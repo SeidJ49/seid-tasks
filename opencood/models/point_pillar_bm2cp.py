@@ -19,6 +19,7 @@ from opencood.utils.camera_utils import gen_dx_bx, cumsum_trick, QuickCumsum, de
 from opencood.models.bm2cp_modules.base_bev_backbone_resnet import ResNetBEVBackbone
 from opencood.models.bm2cp_modules.attentioncomm import ScaledDotProductAttention, AttenComm
 from opencood.models.bm2cp_modules.sensor_blocks import ImgCamEncode
+from opencood.visualization.visualization_debug import save_heatmaps
 
 
 class ImgModalFusion(nn.Module):
@@ -241,6 +242,10 @@ class PointPillarBM2CP(nn.Module):
         batch_dict = self.backbone(batch_dict)
 
         spatial_features_2d = batch_dict['spatial_features_2d']
+
+        save_heatmaps(spatial_features_2d, folder='spatial_features_2d_before', prefix='spatial_features_2d_before')
+        save_heatmaps(batch_dict['spatial_features'], folder='spatial_features_before', prefix='spatial_features_before')
+
         if self.shrink_flag:    # downsample feature to reduce memory
             spatial_features_2d = self.shrink_conv(spatial_features_2d)
         if self.compression:    # compressor
@@ -248,11 +253,14 @@ class PointPillarBM2CP(nn.Module):
 
         # collaborative fusion
         pairwise_t_matrix = data_dict['pairwise_t_matrix']
+
+        psm_single = self.cls_head(spatial_features_2d)
+        save_heatmaps(psm_single, folder='psm_single', prefix='psm_single')
         
         if self.multi_scale:
             fused_feature, communication_rates, result_dict = self.fusion_net(
                                             batch_dict['spatial_features'],
-                                            self.cls_head(spatial_features_2d),
+                                            psm_single,
                                             thres_map,
                                             record_len,
                                             pairwise_t_matrix, 
@@ -272,6 +280,10 @@ class PointPillarBM2CP(nn.Module):
         # decode head
         psm = self.cls_head(fused_feature)
         rm = self.reg_head(fused_feature)
+
+        save_heatmaps(psm, folder='psm', prefix='psm')
+        save_heatmaps(rm, folder='rm', prefix='rm')
+
         # update output dict
         output_dict = {'psm': psm, 'rm': rm}
 
