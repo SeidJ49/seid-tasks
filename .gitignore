@@ -1,9 +1,3 @@
-# Ignore everything at the root
-/*
-
-# Allow opencood folder and its contents
-!/opencood/
-!/opencood/**
-
-# Ignore logs folder inside opencood
+/build/
+/OpenCOOD.egg-info/
 /opencood/logs/
