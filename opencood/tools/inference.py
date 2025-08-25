@@ -110,9 +110,11 @@ def main():
 
     total_comm_rates = []
     # total_box = []
+    frame_times = []
     for i, batch_data in tqdm(enumerate(data_loader)):
         with torch.no_grad():
             batch_data = train_utils.to_device(batch_data, device)
+            start_time = time.time()
             if opt.fusion_method == 'late':
                 pred_box_tensor, pred_score, gt_box_tensor, output_dict = inference_utils.inference_late_fusion(batch_data, model, opencood_dataset)
                 comm = 0
@@ -125,12 +127,15 @@ def main():
                 pred_box_tensor, pred_score, gt_box_tensor = inference_utils.inference_intermediate_fusion(batch_data, model, opencood_dataset)
             elif opt.fusion_method == 'no':
                 pred_box_tensor, pred_score, gt_box_tensor = inference_utils.inference_no_fusion(batch_data, model, opencood_dataset)
-            
             elif opt.fusion_method == 'intermediate_with_comm':
                 pred_box_tensor, pred_score, gt_box_tensor, comm_rates, mask, each_mask = inference_utils.inference_intermediate_fusion_withcomm(batch_data, model, opencood_dataset)
                 total_comm_rates.append(comm_rates)
             else:
                 raise NotImplementedError('Only early, late and intermediate, no, intermediate_with_comm fusion modes are supported.')
+            end_time = time.time()
+            frame_time = end_time - start_time
+            frame_times.append(frame_time)
+            print(f"Frame {i}: inference time = {frame_time:.4f} seconds")
             if pred_box_tensor is None:
                 continue
 
@@ -276,11 +281,15 @@ def main():
     else:
         comm_rates = 0
     ap_30, ap_50, ap_70 = eval_utils.eval_final_results(result_stat, opt.model_dir)
-    
+    if frame_times:
+        avg_time = sum(frame_times) / len(frame_times)
+        print(f"Average inference time per frame: {avg_time:.4f} seconds over {len(frame_times)} frames.")
     with open(os.path.join(saved_path, 'result.txt'), 'a+') as f:
         msg = 'Epoch: {} | AP @0.3: {:.04f} | AP @0.5: {:.04f} | AP @0.7: {:.04f} | comm_rate: {:.06f}\n'.format(epoch_id, ap_30, ap_50, ap_70, comm_rates)
         if opt.comm_thre is not None:
             msg = 'Epoch: {} | AP @0.3: {:.04f} | AP @0.5: {:.04f} | AP @0.7: {:.04f} | comm_rate: {:.06f} | comm_thre: {:.04f}\n'.format(epoch_id, ap_30, ap_50, ap_70, comm_rates, opt.comm_thre)
+        if frame_times:
+            msg += 'Average inference time per frame: {:.4f} seconds over {} frames.\n'.format(avg_time, len(frame_times))
         f.write(msg)
         print(msg)
 

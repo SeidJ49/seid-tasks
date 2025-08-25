@@ -12,6 +12,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from opencood.models.common_modules.torch_transformation_utils import warp_affine_simple
+from opencood.visualization.visualization_debug import save_heatmaps
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -74,6 +75,8 @@ def communication(batch_confidence_maps, threshold_maps, record_len, pairwise_t_
 
         ori_communication_maps = batch_confidence_maps[b].sigmoid().max(dim=1)[0].unsqueeze(
             1)  # dim1=2 represents the confidence of two anchors
+
+        save_heatmaps(ori_communication_maps, folder='ori_communication_maps', prefix='ori_communication_maps')
 
         communication_maps = ori_communication_maps
 
@@ -169,7 +172,12 @@ class AttenComm(nn.Module):
                     _, communication_masks, communication_rates = communication(batch_confidence_maps, batch_level_thres_map, record_len, pairwise_t_matrix)
                     if x.shape[-1] != communication_masks.shape[-1]:
                         communication_masks = F.interpolate(communication_masks, size=(x.shape[-2], x.shape[-1]), mode='bilinear', align_corners=False)
+
+                    save_heatmaps(x, folder='x_before_communication_masks', prefix='x_before_communication_masks')
+                    save_heatmaps(communication_masks, folder='communication_masks', prefix='communication_masks')
                     x = x * communication_masks
+
+                    save_heatmaps(x, folder='x_after_communication_masks', prefix='x_after_communication_masks')
 
                 # split x:[(L1, C, H, W), (L2, C, H, W), ...]
                 # for example [[2, 256, 50, 176], [1, 256, 50, 176], ...]
