@@ -31,6 +31,7 @@ opencood/models/point_pillar.py
 opencood/models/point_pillar_attresnet.py
 opencood/models/point_pillar_baseline_multiscale.py
 opencood/models/point_pillar_bm2cp.py
+opencood/models/point_pillar_bm2cp_radar_camera.py
 opencood/models/point_pillar_coalign.py
 opencood/models/point_pillar_cobevt.py
 opencood/models/point_pillar_disconet.py
@@ -95,6 +96,7 @@ opencood/visualization/vis_data_sequence_dairv2x.py
 opencood/visualization/vis_data_sequence_opv2v.py
 opencood/visualization/vis_merged.py
 opencood/visualization/vis_utils.py
+opencood/visualization/visualization_debug.py
 opencood/visualization/simple_plot3d/__init__.py
 opencood/visualization/simple_plot3d/canvas_3d.py
 opencood/visualization/simple_plot3d/canvas_bev.py
