@@ -1,3 +1,5 @@
 /build/
 /OpenCOOD.egg-info/
 /opencood/logs/
+/build/
+/pypcd/
