@@ -3,8 +3,10 @@
 # License: TDG-Attribution-NonCommercial-NoDistrib
 # Modified from Yue Hu <18671129361@sjtu.edu.cn>
 # Author: Binyu Zhao <byzhao@stu.hit.edu.cn>
-
-
+import csv
+from datetime import datetime
+import inspect
+import os
 from turtle import update
 import torch
 import torch.nn as nn
@@ -14,6 +16,43 @@ import numpy as np
 from opencood.models.common_modules.torch_transformation_utils import warp_affine_simple
 from opencood.visualization.visualization_debug import save_heatmaps
 
+
+def save_to_csv(value):
+    """
+    Save value to CSV if we're in an inference.py context
+
+    Parameters:
+    ----------
+    value : any
+        The value to save to the CSV file
+    """
+    global _called_from_inference
+
+    # Only proceed if the module was imported from inference.py
+
+    # Get the immediate caller's frame for the filename
+    frame = inspect.stack()[1]
+    calling_module = os.path.splitext(os.path.basename(frame.filename))[0]
+
+    # Define the base directory
+    base_dir = '/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/opencood/logs'
+
+    # Create the directory if it doesn't exist
+    os.makedirs(base_dir, exist_ok=True)
+
+    # Create the full path for the CSV file
+    csv_path = os.path.join(base_dir, f"{calling_module}.csv")
+
+    # Get current timestamp
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Write to CSV file
+    file_exists = os.path.exists(csv_path)
+    with open(csv_path, 'a', newline='') as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(['Timestamp', 'Value'])
+        writer.writerow([timestamp, value])
 
 class ScaledDotProductAttention(nn.Module):
     """
@@ -195,6 +234,11 @@ class AttenComm(nn.Module):
                     neighbor_feature = warp_affine_simple(node_features,
                                                     t_matrix[0, :, :, :],
                                                     (H, W))
+                    # neighbor_feature: shape (N, C, H, W), N = number of agents
+                    # Only sum features from agents 1..N-1 (exclude ego, index 0)
+                    transmitted_values = (neighbor_feature[1:] != 0).sum().item()
+                    total_values = neighbor_feature[1:].numel()
+                    save_to_csv([transmitted_values, total_values])
                     x_fuse.append(self.fuse_modules[i](neighbor_feature))
                 x_fuse = torch.stack(x_fuse)
 
