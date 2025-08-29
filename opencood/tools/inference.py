@@ -62,15 +62,20 @@ def main():
         from opencood.utils import eval_utils_opv2v as eval_utils
         left_hand = True
 
+    elif 'adver_city' in opt.model_dir:
+        from opencood.utils import eval_utils_opv2v as eval_utils  # Use the same eval_utils as opv2v
+        left_hand = True  # Same behavior as opv2v
+
+
     elif 'dair' in opt.model_dir:
         from opencood.utils import eval_utils_where2comm as eval_utils
         hypes['validate_dir'] = hypes['test_dir']
         left_hand = False
 
     else:
-        print(f"The path should contain one of the following strings [opv2v|dair] .")
-        return 
-    
+        print(f"The path should contain one of the following strings [opv2v|adver_city|dair] .")
+        return
+
     print(f"Left hand visualizing: {left_hand}")
 
     print('Dataset Building')
@@ -96,25 +101,37 @@ def main():
     print('Loading Model from checkpoint')
     saved_path = opt.model_dir
     epoch_id, model = train_utils.load_model(saved_path, model, opt.eval_epoch, start_from_best=opt.eval_best_epoch)
-        
+
     model.zero_grad()
     model.eval()
 
     # Create the dictionary for evaluation
-    #result_stat = {0.3: {'tp': [], 'fp': [], 'gt': 0},
+    # result_stat = {0.3: {'tp': [], 'fp': [], 'gt': 0},
     #               0.5: {'tp': [], 'fp': [], 'gt': 0},
     #               0.7: {'tp': [], 'fp': [], 'gt': 0}}
-    result_stat = {0.3: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
-                   0.5: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
+    result_stat = {0.3: {'tp': [], 'fp': [], 'gt': 0, 'score': []},
+                   0.5: {'tp': [], 'fp': [], 'gt': 0, 'score': []},
                    0.7: {'tp': [], 'fp': [], 'gt': 0, 'score': []}}
 
     total_comm_rates = []
+
+    ###########################################################################
+    for i, batch_data in tqdm(enumerate(data_loader)):
+        if i >= 30:
+            break
+        batch_data = train_utils.to_device(batch_data, device)
+        if opt.fusion_method == 'intermediate':
+            _ = inference_utils.inference_intermediate_fusion(batch_data, model, opencood_dataset)
+
+    print(f"=== Inference TIMING BLOCK START ===")
+    start_time = time.time()
+    num_batches = 0
+    ##############################################################################
+
     # total_box = []
-    frame_times = []
     for i, batch_data in tqdm(enumerate(data_loader)):
         with torch.no_grad():
             batch_data = train_utils.to_device(batch_data, device)
-            start_time = time.time()
             if opt.fusion_method == 'late':
                 pred_box_tensor, pred_score, gt_box_tensor, output_dict = inference_utils.inference_late_fusion(batch_data, model, opencood_dataset)
                 comm = 0
@@ -131,11 +148,8 @@ def main():
                 pred_box_tensor, pred_score, gt_box_tensor, comm_rates, mask, each_mask = inference_utils.inference_intermediate_fusion_withcomm(batch_data, model, opencood_dataset)
                 total_comm_rates.append(comm_rates)
             else:
-                raise NotImplementedError('Only early, late and intermediate, no, intermediate_with_comm fusion modes are supported.')
-            end_time = time.time()
-            frame_time = end_time - start_time
-            frame_times.append(frame_time)
-            print(f"Frame {i}: inference time = {frame_time:.4f} seconds")
+                raise NotImplementedError(
+                    'Only early, late and intermediate, no, intermediate_with_comm fusion modes are supported.')
             if pred_box_tensor is None:
                 continue
 
@@ -154,12 +168,13 @@ def main():
                                        gt_box_tensor,
                                        result_stat,
                                        0.7)
-                                       
+
             if opt.save_npy:
                 npy_save_path = os.path.join(opt.model_dir, 'npy')
                 if not os.path.exists(npy_save_path):
                     os.makedirs(npy_save_path)
-                inference_utils.save_prediction_gt(pred_box_tensor, gt_box_tensor, batch_data['ego']['origin_lidar'][0], i, npy_save_path)
+                inference_utils.save_prediction_gt(pred_box_tensor, gt_box_tensor, batch_data['ego']['origin_lidar'][0],
+                                                   i, npy_save_path)
 
             # if opt.save_vis_n and opt.save_vis_n >i:
             if opt.save_vis:
@@ -178,8 +193,8 @@ def main():
                 vis_save_path = os.path.join(opt.model_dir, 'vis_image/camera0_%05d.png' % i)
                 pil_image = Image.fromarray(image.astype(np.uint8))
                 pil_image.save(vis_save_path)
-                
-                
+
+
                 vis_save_path = os.path.join(opt.model_dir, 'vis_depth')
                 if not os.path.exists(vis_save_path):
                     os.makedirs(vis_save_path)
@@ -202,24 +217,26 @@ def main():
                 pil_depth = Image.fromarray(draw_depth.astype(np.uint8))
                 pil_depth.save(vis_save_path)
                 """
-                
+
                 vis_save_path = os.path.join(opt.model_dir, 'vis_3d')
                 if not os.path.exists(vis_save_path):
                     os.makedirs(vis_save_path)
                 vis_save_path = os.path.join(opt.model_dir, 'vis_3d/3d_%05d.png' % i)
-                simple_vis.visualize(pred_box_tensor, gt_box_tensor, batch_data['ego']['origin_lidar'][0], 
-                                     hypes['preprocess']['cav_lidar_range'], # hypes['postprocess']['gt_range'], 
-                                     vis_save_path, method='3d', left_hand=left_hand, vis_pred_box=True, vis_gt_box = True)
-                
+                simple_vis.visualize(pred_box_tensor, gt_box_tensor, batch_data['ego']['origin_lidar'][0],
+                                     hypes['preprocess']['cav_lidar_range'],  # hypes['postprocess']['gt_range'],
+                                     vis_save_path, method='3d', left_hand=left_hand, vis_pred_box=True,
+                                     vis_gt_box=True)
+
                 vis_save_path = os.path.join(opt.model_dir, 'vis_bev')
                 if not os.path.exists(vis_save_path):
                     os.makedirs(vis_save_path)
                 vis_save_path = os.path.join(opt.model_dir, 'vis_bev/bev_%05d.png' % i)
                 simple_vis.visualize(pred_box_tensor, gt_box_tensor, batch_data['ego']['origin_lidar'][0],
-                                     hypes['preprocess']['cav_lidar_range'], # hypes['postprocess']['gt_range'], 
-                                     vis_save_path, method='bev', left_hand=left_hand, vis_pred_box=True, vis_gt_box = True)
+                                     hypes['preprocess']['cav_lidar_range'],  # hypes['postprocess']['gt_range'],
+                                     vis_save_path, method='bev', left_hand=left_hand, vis_pred_box=True,
+                                     vis_gt_box=True)
                 """
-                
+
                 if opt.fusion_method == 'intermediate_with_comm':
                     vis_save_path = os.path.join(opt.model_dir, 'vis_mask')
                     if not os.path.exists(vis_save_path):
@@ -271,25 +288,33 @@ def main():
                         pil_mask.save(vis_save_path)
                 """
                 pass
-            
+
+    ######################################################################################################
+    end_time = time.time()
+    print("=== Inference TIMING BLCOK END")
+    print(f"total time: {end_time - start_time} seconds for {num_batches}")
+    if num_batches > 0:
+        print(f"average time {(end_time-start_time)/num_batches} seconds")
+
+
+
+    ######################################################################################################
     # print('total_box: ', sum(total_box)/len(total_box))
 
     if len(total_comm_rates) > 0:
-        comm_rates = (sum(total_comm_rates)/len(total_comm_rates))
+        comm_rates = (sum(total_comm_rates) / len(total_comm_rates))
         if not isinstance(comm_rates, float):
             comm_rates = comm_rates.item()
     else:
         comm_rates = 0
     ap_30, ap_50, ap_70 = eval_utils.eval_final_results(result_stat, opt.model_dir)
-    if frame_times:
-        avg_time = sum(frame_times) / len(frame_times)
-        print(f"Average inference time per frame: {avg_time:.4f} seconds over {len(frame_times)} frames.")
+
     with open(os.path.join(saved_path, 'result.txt'), 'a+') as f:
-        msg = 'Epoch: {} | AP @0.3: {:.04f} | AP @0.5: {:.04f} | AP @0.7: {:.04f} | comm_rate: {:.06f}\n'.format(epoch_id, ap_30, ap_50, ap_70, comm_rates)
+        msg = 'Epoch: {} | AP @0.3: {:.04f} | AP @0.5: {:.04f} | AP @0.7: {:.04f} | comm_rate: {:.06f}\n'.format(
+            epoch_id, ap_30, ap_50, ap_70, comm_rates)
         if opt.comm_thre is not None:
-            msg = 'Epoch: {} | AP @0.3: {:.04f} | AP @0.5: {:.04f} | AP @0.7: {:.04f} | comm_rate: {:.06f} | comm_thre: {:.04f}\n'.format(epoch_id, ap_30, ap_50, ap_70, comm_rates, opt.comm_thre)
-        if frame_times:
-            msg += 'Average inference time per frame: {:.4f} seconds over {} frames.\n'.format(avg_time, len(frame_times))
+            msg = 'Epoch: {} | AP @0.3: {:.04f} | AP @0.5: {:.04f} | AP @0.7: {:.04f} | comm_rate: {:.06f} | comm_thre: {:.04f}\n'.format(
+                epoch_id, ap_30, ap_50, ap_70, comm_rates, opt.comm_thre)
         f.write(msg)
         print(msg)
 
