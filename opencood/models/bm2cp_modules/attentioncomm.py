@@ -18,6 +18,7 @@ from opencood.visualization.visualization_debug import save_heatmaps
 
 
 def save_to_csv(value):
+    return
     """
     Save value to CSV if we're in an inference.py context
 
