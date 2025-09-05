@@ -1,12 +1,17 @@
+# -*- coding: utf-8 -*-
+# Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
+# License: TDG-Attribution-NonCommercial-NoDistrib
+
+
 import os
 from multiprocessing import Process
 import numpy as np
 from tqdm import tqdm
 from PIL import Image
 import h5py
-mp = 24
+mp = 8
 
-def load_camera_data(camera_files, preload=False):
+def load_camera_data(camera_files, preload=True):
     """
     Args:
         camera_files: list, 
@@ -63,6 +68,8 @@ def parallel_transform(scenario_folders):
         # loop over all CAV data
         for (j, cav_id) in enumerate(cav_list):
             cav_path = os.path.join(scenario_folder, cav_id)
+            if not os.path.isdir(cav_path):
+                continue
 
             yaml_files = \
                 sorted([os.path.join(cav_path, x)
@@ -80,17 +87,17 @@ def parallel_transform(scenario_folders):
                 if os.path.exists(os.path.join(cav_path, timestamp+"_imgs.hdf5")):
                     continue
                 camera_files = load_camera_files(cav_path, timestamp, name="camera")
-                depth_files = load_camera_files(cav_path, timestamp, name="depth")
+                # depth_files = load_camera_files(cav_path, timestamp, name="depth")
                 camera_data = load_camera_data(camera_files, True)
-                depth_data = load_camera_data(depth_files, True)
+                # depth_data = load_camera_data(depth_files, True)
                 with h5py.File(os.path.join(cav_path, timestamp+"_imgs.hdf5"), "w") as f:
                     for i in range(4):
                         f.create_dataset(f"camera{i}", data=camera_data[i])
-                    for i in range(4):
-                        f.create_dataset(f"depth{i}", data=depth_data[i])
+                    # for i in range(4):
+                    #     f.create_dataset(f"depth{i}", data=depth_data[i])
 
 if __name__=="__main__":
-    split_folders = [f"/GPFS/public/OPV2V_MoreAgents/{split}" for split in ['train', 'validate', 'test']]
+    split_folders = [f"/GPFS/rhome/yifanlu/workspace/OpenCOODv2/dataset/V2XSET/{split}" for split in ['train', 'validate', 'test']]
     scenario_folders = []
     print(split_folders)
 
@@ -98,6 +105,8 @@ if __name__=="__main__":
         scenario_folders += sorted([os.path.join(root_dir, x)
                                     for x in os.listdir(root_dir) if
                                     os.path.isdir(os.path.join(root_dir, x))])
+
+    scenario_folders = [x for x in scenario_folders if '2021_09_09_13_20_58' not in x]
 
     
     mp_split = np.array_split(scenario_folders, mp)

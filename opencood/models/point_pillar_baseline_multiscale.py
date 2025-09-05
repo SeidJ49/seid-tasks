@@ -1,17 +1,17 @@
+# -*- coding: utf-8 -*-
 # Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
-# a class that integrate multiple simple fusion methods (Single Scale)
+# License: TDG-Attribution-NonCommercial-NoDistrib
 # Support F-Cooper, Self-Att, DiscoNet(wo KD), V2VNet, V2XViT, When2comm
 
 import torch.nn as nn
-# from icecream import ic
-from opencood.models.common_modules.pillar_vfe import PillarVFE
-from opencood.models.common_modules.point_pillar_scatter import PointPillarScatter
-from opencood.models.common_modules.base_bev_backbone_resnet import ResNetBEVBackbone 
-from opencood.models.common_modules.base_bev_backbone import BaseBEVBackbone 
-from opencood.models.common_modules.downsample_conv import DownsampleConv
-from opencood.models.common_modules.naive_compress import NaiveCompressor
-
-from opencood.models.coalign_modules.fusion_in_one import MaxFusion, AttFusion, DiscoFusion, V2VNetFusion, V2XViTFusion, When2commFusion
+from icecream import ic
+from opencood.models.sub_modules.pillar_vfe import PillarVFE
+from opencood.models.sub_modules.point_pillar_scatter import PointPillarScatter
+from opencood.models.sub_modules.base_bev_backbone_resnet import ResNetBEVBackbone 
+from opencood.models.sub_modules.base_bev_backbone import BaseBEVBackbone 
+from opencood.models.sub_modules.downsample_conv import DownsampleConv
+from opencood.models.sub_modules.naive_compress import NaiveCompressor
+from opencood.models.fuse_modules.fusion_in_one import MaxFusion, AttFusion, DiscoFusion, V2VNetFusion, V2XViTFusion, When2commFusion
 from opencood.utils.transformation_utils import normalize_pairwise_tfm
 
 class PointPillarBaselineMultiscale(nn.Module):
@@ -100,14 +100,13 @@ class PointPillarBaselineMultiscale(nn.Module):
                       'voxel_coords': voxel_coords,
                       'voxel_num_points': voxel_num_points,
                       'record_len': record_len}
-        
         # n, 4 -> n, c
         batch_dict = self.pillar_vfe(batch_dict)
         # n, c -> N, C, H, W
         batch_dict = self.scatter(batch_dict)
         # calculate pairwise affine transformation matrix
         _, _, H0, W0 = batch_dict['spatial_features'].shape # original feature map shape H0, W0
-        t_matrix = normalize_pairwise_tfm(data_dict['pairwise_t_matrix'], H0, W0, self.voxel_size[0])
+        normalized_affine_matrix = normalize_pairwise_tfm(data_dict['pairwise_t_matrix'], H0, W0, self.voxel_size[0])
 
         spatial_features = batch_dict['spatial_features']
 
@@ -116,14 +115,9 @@ class PointPillarBaselineMultiscale(nn.Module):
 
         # multiscale fusion
         feature_list = self.backbone.get_multiscale_feature(spatial_features)
-
-        comm_rates = []
-        for feature in feature_list:
-            comm_rates.append(feature.count_nonzero().item())
-        
         fused_feature_list = []
         for i, fuse_module in enumerate(self.fusion_net):
-            fused_feature_list.append(fuse_module(feature_list[i], record_len, t_matrix))
+            fused_feature_list.append(fuse_module(feature_list[i], record_len, normalized_affine_matrix))
         fused_feature = self.backbone.decode_multiscale_feature(fused_feature_list) 
 
         if self.shrink_flag:
@@ -134,15 +128,6 @@ class PointPillarBaselineMultiscale(nn.Module):
 
         output_dict = {'cls_preds': psm,
                        'reg_preds': rm}
-        output_dict.update({
-            'psm': psm,
-            'rm': rm
-        })
-        output_dict.update({
-            'mask': 0,
-            'each_mask': 0,
-            'comm_rate': sum(comm_rates)
-        })
 
         if self.use_dir:
             output_dict.update({'dir_preds': self.dir_head(fused_feature)})

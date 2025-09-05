@@ -11,6 +11,55 @@ import numpy as np
 import torch
 from shapely.geometry import Polygon
 import json
+import pickle
+from collections import OrderedDict
+
+def merge_features_to_dict(processed_feature_list, merge=None):
+    """
+    Merge the preprocessed features from different cavs to the same
+    dictionary.
+
+    Parameters
+    ----------
+    processed_feature_list : list
+        A list of dictionary containing all processed features from
+        different cavs.
+    merge : "stack" or "cat". used for images
+
+    Returns
+    -------
+    merged_feature_dict: dict
+        key: feature names, value: list of features.
+    """
+
+    merged_feature_dict = OrderedDict()
+
+    for i in range(len(processed_feature_list)):
+        for feature_name, feature in processed_feature_list[i].items():
+            if feature_name not in merged_feature_dict:
+                merged_feature_dict[feature_name] = []
+            if isinstance(feature, list):
+                merged_feature_dict[feature_name] += feature
+            else:
+                merged_feature_dict[feature_name].append(feature) # merged_feature_dict['coords'] = [f1,f2,f3,f4]
+    
+    # stack them
+    # it usually happens when merging cavs images -> v.shape = [N, Ncam, C, H, W]
+    # cat them
+    # it usually happens when merging batches cav images -> v is a list [(N1+N2+...Nn, Ncam, C, H, W))]
+    if merge=='stack': 
+        for feature_name, features in merged_feature_dict.items():
+            merged_feature_dict[feature_name] = torch.stack(features, dim=0)
+    elif merge=='cat':
+        for feature_name, features in merged_feature_dict.items():
+            merged_feature_dict[feature_name] = torch.cat(features, dim=0)
+
+    return merged_feature_dict
+
+def load_pkl_files(pkl_path):
+    with open(pkl_path, 'rb') as f:
+        data = pickle.load(f)
+    return data
 
 def read_json(file_path):
     with open(file_path, 'r') as f:
@@ -223,3 +272,25 @@ def get_voxel_centers(voxel_coords,
     pc_range = torch.tensor(point_cloud_range[0:3], device=voxel_centers.device).float()
     voxel_centers = (voxel_centers + 0.5) * voxel_size + pc_range
     return voxel_centers
+
+def scatter_point_inds(indices, point_inds, shape):
+    ret = -1 * torch.ones(*shape, dtype=point_inds.dtype, device=point_inds.device) # 初始化结果 (8, 21, 800, 704)
+    ndim = indices.shape[-1] # 获取坐标维度 4
+    flattened_indices = indices.view(-1, ndim) # 将坐标展平 (204916, 4)
+    # 以下两步是经典操作
+    slices = [flattened_indices[:, i] for i in range(ndim)] # 分成4个list
+    ret[slices] = point_inds # 将voxel的索引写入对应位置
+    return ret
+
+def generate_voxel2pinds(sparse_tensor):
+    """
+    计算有效voxel在原始空间shape中的索引
+    """
+    device = sparse_tensor.indices.device # 获取device
+    batch_size = sparse_tensor.batch_size # 获取batch_size
+    spatial_shape = sparse_tensor.spatial_shape # 获取空间形状 (21, 800, 704)
+    indices = sparse_tensor.indices.long() # 获取索引
+    point_indices = torch.arange(indices.shape[0], device=device, dtype=torch.int32) # 生成索引 (204916,)
+    output_shape = [batch_size] + list(spatial_shape) # 计算输出形状 (8, 21, 800, 704)
+    v2pinds_tensor = scatter_point_inds(indices, point_indices, output_shape)
+    return v2pinds_tensor

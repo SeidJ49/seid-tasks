@@ -4,12 +4,6 @@
 
 
 import os
-
-import sys
-root_path = os.path.abspath(__file__)
-root_path = '/'.join(root_path.split('/')[:-3])
-sys.path.append(root_path)
-
 from torch.utils.data import DataLoader, Subset
 from opencood.data_utils import datasets
 import torch
@@ -24,10 +18,12 @@ import numpy as np
 
 if __name__ == '__main__':
     current_path = os.path.dirname(os.path.realpath(__file__))
-    params = load_yaml(os.path.join(current_path, '../hypes_yaml/visualization_v2x.yaml'))
-    output_path = "/home/data_vis/v2x_2.0_new/train"
+    params = load_yaml(os.path.join(current_path,
+                                    '../hypes_yaml/visualization_v2x.yaml'))
+    output_path = "/GPFS/rhome/yifanlu/OpenCOOD/data_vis/v2x_2.0_new/train"
 
-    opencda_dataset = LateFusionDatasetV2X(params, visualize=True, train=False)
+    opencda_dataset = LateFusionDatasetV2X(params, visualize=True,
+                                            train=False)
     len = len(opencda_dataset)
     sampled_indices = np.random.permutation(len)[:100]
     subset = Subset(opencda_dataset, sampled_indices)
@@ -36,12 +32,11 @@ if __name__ == '__main__':
                              collate_fn=opencda_dataset.collate_batch_test,
                              shuffle=False,
                              pin_memory=False)
-    vis_gt_box = False # True
+    vis_gt_box = True
     vis_pred_box = False
     hypes = params
 
-    device = torch.device('cpu')
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     for i, batch_data in enumerate(data_loader):
         print(i)

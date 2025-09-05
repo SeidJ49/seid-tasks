@@ -1,56 +1,25 @@
-# -*- coding: utf-8 -*-
-# Author: Binyu Zhao <byzhao@stu.hit.edu.cn>
-# Author: Runsheng Xu <rxx3386@ucla.edu>
-# License: TDG-Attribution-NonCommercial-NoDistrib
-
-from opencood.data_utils.datasets.opv2v.early_fusion_dataset import EarlyFusionDataset as EarlyFusionDatasetOPV2V
-from opencood.data_utils.datasets.opv2v.intermediate_fusion_dataset import IntermediateFusionDataset as IntermediateFusionDatasetOPV2V
-from opencood.data_utils.datasets.opv2v.intermediate_fusion_dataset_v2 import IntermediateFusionDatasetV2 as IntermediateFusionDatasetOPV2V_V2
-from opencood.data_utils.datasets.opv2v.intermediate_fusion_dataset_multi_frame import IntermediateFusionDataset as IntermediateFusionDatasetOPV2V_MULTI
-from opencood.data_utils.datasets.opv2v.intermediate_fusion_dataset_multi_frame_how2comm import IntermediateFusionDataset as IntermediateFusionDatasetOPV2V_MULTI_HOW2COMM
-from opencood.data_utils.datasets.opv2v.late_fusion_dataset import LateFusionDataset as LateFusionDatasetOPV2V
-from opencood.data_utils.datasets.opv2v.lidar_camera_intermediate_fusion_dataset import LiDARCameraIntermediateFusionDataset as LiDARCameraIntermediateFusionDatasetOPV2V
-from opencood.data_utils.datasets.opv2v.lidar_camera_intermediate_fusion_dataset_v2 import LiDARCameraIntermediateFusionDataset as LiDARCameraIntermediateFusionDatasetOPV2V_V2
-
-from opencood.data_utils.datasets.dair.early_fusion_dataset import EarlyFusionDatasetDAIR
-from opencood.data_utils.datasets.dair.intermediate_fusion_dataset import IntermediateFusionDatasetDAIR
-from opencood.data_utils.datasets.dair.intermediate_fusion_dataset_multi_frame import IntermediateFusionDatasetDAIR as IntermediateFusionDatasetDAIR_MULTI
-from opencood.data_utils.datasets.dair.late_fusion_dataset import LateFusionDatasetDAIR
-from opencood.data_utils.datasets.dair.lidar_camera_intermediate_fusion_dataset import LiDARCameraIntermediateFusionDatasetDAIR
-from opencood.data_utils.datasets.dair.lidar_camera_intermediate_fusion_dataset_v2 import LiDARCameraIntermediateFusionDatasetDAIR as LiDARCameraIntermediateFusionDatasetDAIR_V2
-
-__all__ = {
-    'EarlyFusionDatasetOPV2V': EarlyFusionDatasetOPV2V,
-    'IntermediateFusionDatasetOPV2V': IntermediateFusionDatasetOPV2V,
-    'IntermediateFusionDatasetOPV2V_V2': IntermediateFusionDatasetOPV2V_V2,
-    'IntermediateFusionDatasetOPV2V_Multi': IntermediateFusionDatasetOPV2V_MULTI,
-    'IntermediateFusionDatasetOPV2V_Multi_How2comm': IntermediateFusionDatasetOPV2V_MULTI_HOW2COMM,
-    'LateFusionDatasetOPV2V': LateFusionDatasetOPV2V,
-    'LiDARCameraIntermediateFusionDatasetOPV2V': LiDARCameraIntermediateFusionDatasetOPV2V,
-    'LiDARCameraIntermediateFusionDatasetOPV2V_V2': LiDARCameraIntermediateFusionDatasetOPV2V_V2,
-
-    'EarlyFusionDatasetDAIR': EarlyFusionDatasetDAIR,
-    'IntermediateFusionDatasetDAIR': IntermediateFusionDatasetDAIR,
-    'IntermediateFusionDatasetDAIR_Multi': IntermediateFusionDatasetDAIR_MULTI,
-    'LateFusionDatasetDAIR': LateFusionDatasetDAIR,
-    'LiDARCameraIntermediateFusionDatasetDAIR': LiDARCameraIntermediateFusionDatasetDAIR,
-    'LiDARCameraIntermediateFusionDatasetDAIR_V2': LiDARCameraIntermediateFusionDatasetDAIR_V2,
-}
-
-# the final range for evaluation
-GT_RANGE_OPV2V = [-140, -40, -3, 140, 40, 1]
-GT_RANGE_V2XSIM = [-32, -32, -3, 32, 32, 1]
-# The communication range for cavs
-COM_RANGE = 70
-
+from opencood.data_utils.datasets.late_fusion_dataset import getLateFusionDataset
+from opencood.data_utils.datasets.early_fusion_dataset import getEarlyFusionDataset
+from opencood.data_utils.datasets.intermediate_fusion_dataset import getIntermediateFusionDataset
+from opencood.data_utils.datasets.intermediate_2stage_fusion_dataset import getIntermediate2stageFusionDataset
+from opencood.data_utils.datasets.basedataset.opv2v_basedataset import OPV2VBaseDataset
+from opencood.data_utils.datasets.basedataset.v2xsim_basedataset import V2XSIMBaseDataset
+from opencood.data_utils.datasets.basedataset.dairv2x_basedataset import DAIRV2XBaseDataset
+from opencood.data_utils.datasets.basedataset.v2xset_basedataset import V2XSETBaseDataset
 
 def build_dataset(dataset_cfg, visualize=False, train=True):
-    dataset_name = dataset_cfg['fusion']['core_method']
-    error_message = f"{dataset_name} is not found. " \
-                    f"Please add your processor file's name in opencood/" \
-                    f"data_utils/datasets/init.py"
+    fusion_name = dataset_cfg['fusion']['core_method']
+    dataset_name = dataset_cfg['fusion']['dataset']
 
-    dataset = __all__[dataset_name](
+    assert fusion_name in ['late', 'intermediate', 'intermediate2stage', 'early']
+    assert dataset_name in ['opv2v', 'v2xsim', 'dairv2x', 'v2xset']
+
+    fusion_dataset_func = "get" + fusion_name.capitalize() + "FusionDataset"
+    fusion_dataset_func = eval(fusion_dataset_func)
+    base_dataset_cls = dataset_name.upper() + "BaseDataset"
+    base_dataset_cls = eval(base_dataset_cls)
+
+    dataset = fusion_dataset_func(base_dataset_cls)(
         params=dataset_cfg,
         visualize=visualize,
         train=train

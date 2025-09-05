@@ -14,7 +14,8 @@ import torch
 from torch.nn.functional import sigmoid
 import torch.nn.functional as F
 
-from opencood.data_utils.post_processor.base_postprocessor import BasePostprocessor
+from opencood.data_utils.post_processor.base_postprocessor \
+    import BasePostprocessor
 from opencood.utils import box_utils
 from opencood.utils.box_overlaps import bbox_overlaps
 from opencood.visualization import vis_utils
@@ -22,8 +23,8 @@ from opencood.utils.common_utils import limit_period
 
 
 class VoxelPostprocessor(BasePostprocessor):
-    def __init__(self, anchor_params, dataset, train):
-        super(VoxelPostprocessor, self).__init__(anchor_params, dataset, train)
+    def __init__(self, anchor_params, train):
+        super(VoxelPostprocessor, self).__init__(anchor_params, train)
         self.anchor_num = self.params['anchor_args']['num']
 
     def generate_anchor_box(self):
@@ -52,7 +53,7 @@ class VoxelPostprocessor(BasePostprocessor):
             feature_stride = 2
 
 
-        x = np.linspace(xrange[0] + vw, xrange[1] - vw, W // feature_stride)
+        x = np.linspace(xrange[0] + vw, xrange[1] - vw, W // feature_stride) # vw is not precise, vw * feature_stride / 2 should be better?
         y = np.linspace(yrange[0] + vh, yrange[1] - vh, H // feature_stride)
 
 
@@ -271,25 +272,36 @@ class VoxelPostprocessor(BasePostprocessor):
         # the final bounding box list
         pred_box3d_list = []
         pred_box2d_list = []
-
         for cav_id, cav_content in data_dict.items():
             assert cav_id in output_dict
             # the transformation matrix to ego space
             transformation_matrix = cav_content['transformation_matrix'] # no clean
 
+            # rename variable 
+            if 'psm' in output_dict[cav_id]:
+                output_dict[cav_id]['cls_preds'] = output_dict[cav_id]['psm']
+            if 'rm' in output_dict:
+                output_dict[cav_id]['reg_preds'] = output_dict[cav_id]['rm']
+            if 'dm' in output_dict:
+                output_dict[cav_id]['dir_preds'] = output_dict[cav_id]['dm']
+
             # (H, W, anchor_num, 7)
             anchor_box = cav_content['anchor_box']
 
             # classification probability
-            prob = output_dict[cav_id]['psm']
+            prob = output_dict[cav_id]['cls_preds']
             prob = F.sigmoid(prob.permute(0, 2, 3, 1))
             prob = prob.reshape(1, -1)
 
             # regression map
-            reg = output_dict[cav_id]['rm']
+            reg = output_dict[cav_id]['reg_preds']
 
             # convert regression map back to bounding box
-            batch_box3d = self.delta_to_boxes3d(reg, anchor_box)
+            if len(reg.shape) == 4: # anchor-based. PointPillars, SECOND
+                batch_box3d = self.delta_to_boxes3d(reg, anchor_box)
+            else: # anchor-free. CenterPoint
+                batch_box3d = reg.view(1, -1, 7)
+
             mask = \
                 torch.gt(prob, self.params['target_args']['score_threshold'])
             mask = mask.view(1, -1)
@@ -302,12 +314,12 @@ class VoxelPostprocessor(BasePostprocessor):
             scores = torch.masked_select(prob[0], mask[0])
 
             # adding dir classifier
-            if 'dm' in output_dict[cav_id].keys() and len(boxes3d) !=0:
+            if 'dir_preds' in output_dict[cav_id].keys() and len(boxes3d) !=0:
                 dir_offset = self.params['dir_args']['dir_offset']
                 num_bins = self.params['dir_args']['num_bins']
 
 
-                dm  = output_dict[cav_id]['dm'] # [N, H, W, 4]
+                dm  = output_dict[cav_id]['dir_preds'] # [N, H, W, 4]
                 dir_cls_preds = dm.permute(0, 2, 3, 1).contiguous().reshape(1, -1, num_bins) # [1, N*H*W*2, 2]
                 dir_cls_preds = dir_cls_preds[mask]
                 # if rot_gt > 0, then the label is 1, then the regression target is [0, 1]
@@ -319,6 +331,12 @@ class VoxelPostprocessor(BasePostprocessor):
                 ) # 限制在0到pi之间
                 boxes3d[..., 6] = dir_rot + dir_offset + period * dir_labels.to(dir_cls_preds.dtype) # 转化0.25pi到2.5pi
                 boxes3d[..., 6] = limit_period(boxes3d[..., 6], 0.5, 2 * np.pi) # limit to [-pi, pi]
+
+            if 'iou_preds' in output_dict[cav_id].keys() and len(boxes3d) != 0:
+                iou = torch.sigmoid(output_dict[cav_id]['iou_preds'].permute(0, 2, 3, 1).contiguous()).reshape(1, -1)
+                iou = torch.clamp(iou, min=0.0, max=1.0)
+                iou = (iou + 1) * 0.5
+                scores = scores * torch.pow(iou.masked_select(mask), 4)
 
             # convert output to bounding box
             if len(boxes3d) != 0:
@@ -351,7 +369,7 @@ class VoxelPostprocessor(BasePostprocessor):
         # predicted 3d bbx
         pred_box3d_tensor = torch.vstack(pred_box3d_list)
         # remove large bbx
-        keep_index_1 = box_utils.remove_large_pred_bbx(pred_box3d_tensor, self.dataset)
+        keep_index_1 = box_utils.remove_large_pred_bbx(pred_box3d_tensor)
         keep_index_2 = box_utils.remove_bbx_abnormal_z(pred_box3d_tensor)
         keep_index = torch.logical_and(keep_index_1, keep_index_2)
 
@@ -369,16 +387,18 @@ class VoxelPostprocessor(BasePostprocessor):
 
         # select cooresponding score
         scores = scores[keep_index]
-
-        # filter out the prediction out of the range.
-        #mask = box_utils.get_mask_for_boxes_within_range_torch(pred_box3d_tensor, self.params['gt_range'])
-        mask = box_utils.get_mask_for_boxes_within_range_torch(pred_box3d_tensor, self.params['anchor_args']['cav_lidar_range'])
-        pred_box3d_tensor = pred_box3d_tensor[mask, :, :]
+        
+        # filter out the prediction out of the range. with z-dim
+        pred_box3d_np = pred_box3d_tensor.cpu().numpy()
+        pred_box3d_np, mask = box_utils.mask_boxes_outside_range_numpy(pred_box3d_np,
+                                                    self.params['gt_range'],
+                                                    order=None,
+                                                    return_mask=True)
+        pred_box3d_tensor = torch.from_numpy(pred_box3d_np).to(device=pred_box3d_tensor.device)
         scores = scores[mask]
 
         assert scores.shape[0] == pred_box3d_tensor.shape[0]
 
-        # return pred_box3d_tensor, scores, count
         return pred_box3d_tensor, scores
 
     @staticmethod
@@ -389,7 +409,7 @@ class VoxelPostprocessor(BasePostprocessor):
         Parameters
         ----------
         deltas : torch.Tensor
-            (N, W, L, 14)?? should be (N, 14, H, W)
+            (N, 14, H, W)
         anchors : torch.Tensor
             (W, L, 2, 7) -> xyzhwlr
 

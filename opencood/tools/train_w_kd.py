@@ -1,12 +1,9 @@
-
+# -*- coding: utf-8 -*-
+# Author: Yifan Lu <yifan_lu@sjtu.edu.cn>
+# License: TDG-Attribution-NonCommercial-NoDistrib
 import argparse
 import os
 import statistics
-
-import sys
-root_path = os.path.abspath(__file__)
-root_path = '/'.join(root_path.split('/')[:-3])
-sys.path.append(root_path)
 
 import torch
 from torch.utils.data import DataLoader
@@ -16,7 +13,7 @@ import importlib
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.tools import train_utils
 from opencood.data_utils.datasets import build_dataset
-
+import glob
 from icecream import ic
 
 
@@ -44,14 +41,14 @@ def main():
 
     train_loader = DataLoader(opencood_train_dataset,
                               batch_size=hypes['train_params']['batch_size'],
-                              num_workers=0,
+                              num_workers=8,
                               collate_fn=opencood_train_dataset.collate_batch_train,
                               shuffle=True,
                               pin_memory=True,
                               drop_last=True)
     val_loader = DataLoader(opencood_validate_dataset,
                             batch_size=hypes['train_params']['batch_size'],
-                            num_workers=0,
+                            num_workers=8,
                             collate_fn=opencood_train_dataset.collate_batch_train,
                             shuffle=True,
                             pin_memory=True,
@@ -59,10 +56,6 @@ def main():
 
     print('Creating Model')
     model = train_utils.create_model(hypes)
-    total = sum([param.nelement() for param in model.parameters()])
-    print("Number of parameter: %d" % (total))
-    # print("Number of parameter: %.2fM" % (total/1e6))
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # we assume gpu is necessary
@@ -99,7 +92,7 @@ def main():
 
     print('Training start')
     epoches = hypes['train_params']['epoches']
-    supervise_single_flag = True if 'supervise_single' in hypes['train_params'] and hypes['train_params']['supervise_single'] else False
+    supervise_single_flag = False if not hasattr(opencood_train_dataset, "supervise_single") else opencood_train_dataset.supervise_single
 
     ############ For DiscoNet ##############
     if "kd_flag" in hypes.keys():
@@ -125,7 +118,7 @@ def main():
             p.requires_grad_(False)
 
         if torch.cuda.is_available():
-                teacher_model.to(device)
+            teacher_model.to(device)
 
         teacher_model.eval()
     else:
@@ -158,10 +151,6 @@ def main():
                 final_loss += criterion(ouput_dict, batch_data['ego']['label_dict_single'], suffix="_single")
                 criterion.logging(epoch, i, len(train_loader), writer, suffix="_single")
 
-            with open(os.path.join(saved_path, 'train_loss.txt'), 'a+') as f:
-                msg = 'Epoch[{}], iter[{}/{}], loss[{}]. \n'.format(epoch, i, len(train_loader), final_loss)
-                f.write(msg)
-
             # back-propagation
             final_loss.backward()
             optimizer.step()
@@ -188,15 +177,11 @@ def main():
                     final_loss = criterion(ouput_dict,
                                            batch_data['ego']['label_dict'])
                     valid_ave_loss.append(final_loss.item())
+
             valid_ave_loss = statistics.mean(valid_ave_loss)
-
-            print("valid_ave_loss: ", valid_ave_loss)
-            print('At epoch %d, the validation loss is %f' % (epoch, valid_ave_loss))
+            print('At epoch %d, the validation loss is %f' % (epoch,
+                                                              valid_ave_loss))
             writer.add_scalar('Validate_Loss', valid_ave_loss, epoch)
-
-            with open(os.path.join(saved_path, 'validation_loss.txt'), 'a+') as f:
-                msg = 'Epoch[{}], loss[{}]. \n'.format(epoch, valid_ave_loss)
-                f.write(msg)
             
             # lowest val loss
             if valid_ave_loss < lowest_val_loss:
@@ -211,15 +196,33 @@ def main():
                 lowest_val_epoch = epoch + 1
 
         if epoch % hypes['train_params']['save_freq'] == 0:
-            torch.save(model.state_dict(), os.path.join(saved_path, 'net_epoch%d.pth' % (epoch + 1)))
+            torch.save(model.state_dict(),
+                       os.path.join(saved_path,
+                                    'net_epoch%d.pth' % (epoch + 1)))
         scheduler.step(epoch)
 
     print('Training Finished, checkpoints saved to %s' % saved_path)
     torch.cuda.empty_cache()
     run_test = True
+    
+    # ddp training may leave multiple bestval
+    bestval_model_list = glob.glob(os.path.join(saved_path, "net_epoch_bestval_at*"))
+    
+    if len(bestval_model_list) > 1:
+        import numpy as np
+        bestval_model_epoch_list = [eval(x.split("/")[-1].lstrip("net_epoch_bestval_at").rstrip(".pth")) for x in bestval_model_list]
+        ascending_idx = np.argsort(bestval_model_epoch_list)
+        for idx in ascending_idx:
+            if idx != (len(bestval_model_list) - 1):
+                os.remove(bestval_model_list[idx])
+
     if run_test:
         fusion_method = opt.fusion_method
-        cmd = f"python opencood/tools/inference_w_noise.py --model_dir {saved_path} --fusion_method {fusion_method}"
+
+        if 'noise_setting' in hypes and hypes['noise_setting']['add_noise']:
+            cmd = f"python opencood/tools/inference_w_noise.py --model_dir {saved_path} --fusion_method {fusion_method}"
+        else:
+            cmd = f"python opencood/tools/inference.py --model_dir {saved_path} --fusion_method {fusion_method}"
         print(f"Running command: {cmd}")
         os.system(cmd)
 

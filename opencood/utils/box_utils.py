@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Author: Runsheng Xu <rxx3386@ucla.edu>, Hao Xiang <haxiang@g.ucla.edu>,
+# Author: Yifan Lu <yifan_lu@sjtu.edu.cn>, Runsheng Xu <rxx3386@ucla.edu>, Hao Xiang <haxiang@g.ucla.edu>,
 # License: TDG-Attribution-NonCommercial-NoDistrib
 
 
@@ -453,7 +453,6 @@ def project_world_objects(object_dict,
                           lidar_pose,
                           lidar_range,
                           order,
-                          dataset,
                           enlarge_z=False):
     """
     Project the objects under world coordinates into another coordinate
@@ -479,10 +478,7 @@ def project_world_objects(object_dict,
     for object_id, object_content in object_dict.items():
         location = object_content['location']
         rotation = object_content['angle']
-        if dataset == 'dair':
-            center = [0,0,0] if 'center' not in object_content else object_content['center']
-        else:
-            center = object_content['center']
+        center = [0,0,0] if 'center' not in object_content else object_content['center']
         extent = object_content['extent']
 
         object_pose = [location[0] + center[0],
@@ -841,7 +837,7 @@ def nms_pytorch(boxes: torch.tensor, thresh_iou: float):
     return keep
 
 
-def remove_large_pred_bbx(bbx_3d, dataset):
+def remove_large_pred_bbx(bbx_3d):
     """
     Remove large bounding box.
 
@@ -863,12 +859,8 @@ def remove_large_pred_bbx(bbx_3d, dataset):
     bbx_y_min = torch.min(bbx_3d[:, :, 1], dim=1)[0]
     y_len = bbx_y_max - bbx_y_min
 
-    if dataset == 'dair':
-        bbx_z_max = torch.max(bbx_3d[:, :, 1], dim=1)[0]
-        bbx_z_min = torch.min(bbx_3d[:, :, 1], dim=1)[0]
-    else:
-        bbx_z_max = torch.max(bbx_3d[:, :, 2], dim=1)[0]
-        bbx_z_min = torch.min(bbx_3d[:, :, 2], dim=1)[0]
+    bbx_z_max = torch.max(bbx_3d[:, :, 1], dim=1)[0]
+    bbx_z_min = torch.min(bbx_3d[:, :, 1], dim=1)[0]
     z_len = bbx_z_max - bbx_z_min
 
     index = torch.logical_and(x_len <= 6, y_len <= 6)
@@ -914,18 +906,20 @@ def project_points_by_matrix_torch(points, transformation_matrix):
     projected_points : torch.Tensor
         The projected points, (N, 3)
     """
-    points, is_numpy = common_utils.check_numpy_to_torch(points)
-    transformation_matrix, _ = common_utils.check_numpy_to_torch(transformation_matrix)
+    points, is_numpy = \
+        common_utils.check_numpy_to_torch(points)
+    transformation_matrix, _ = \
+        common_utils.check_numpy_to_torch(transformation_matrix)
 
     # convert to homogeneous coordinates via padding 1 at the last dimension.
     # (N, 4)
     points_homogeneous = F.pad(points, (0, 1), mode="constant", value=1)
     # (N, 4)
-    projected_points = torch.einsum("ik, jk->ij", points_homogeneous, transformation_matrix)
+    projected_points = torch.einsum("ik, jk->ij", points_homogeneous,
+                                    transformation_matrix)
 
-    if not is_numpy:
-        return projected_points[:, :3]
-    return projected_points[:, :3].numpy()
+    return projected_points[:, :3] if not is_numpy \
+        else projected_points[:, :3].numpy()
 
 
 def box_encode(
@@ -1150,6 +1144,11 @@ def load_single_objects_dairv2x(object_list,
         h = object_content['3d_dimensions']['h']
         w = object_content['3d_dimensions']['w']
         rotation = object_content['rotation']
+
+        if isinstance(x, str): # in camera label, xyz are str
+            x = eval(x)
+            y = eval(y)
+            z = eval(z)
 
         if l==0 or h ==0 or w==0:
             continue

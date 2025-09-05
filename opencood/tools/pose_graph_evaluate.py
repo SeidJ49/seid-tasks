@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+# Author: Yifan Lu <yifan_lu@#sjtu.edu.cn>
+# License: TDG-Attribution-NonCommercial-NoDistrib
+
+
 import json
 import copy
 import numpy as np
@@ -210,7 +215,7 @@ def evaluate_pose_graph(data_dict, save_path, std=0.2):
 
 
 
-evaluate_json = "/GPFS/rhome/yifanlu/OpenCOOD/stage1_boxes/opv2v/train/stage1_boxes.json"
+evaluate_json = "/remote-home/share/yifanlu/OpenCOODv2/opencood/logs/stage1_boxes.json"
 data_dict = read_json(evaluate_json)
 # data_dict = {"1":data_dict["1"], "2": data_dict["2"]}
 
@@ -218,8 +223,8 @@ data_dict = read_json(evaluate_json)
 # evaluate_pose_graph(data_dict, output_path, std=0.2)
 
 
-output_path = "/GPFS/rhome/yifanlu/OpenCOOD/vis_result/A_opv2v_BA_clip_flatten/dist_06"
-evaluate_pose_graph(data_dict, output_path, std=0.6)
+output_path = "/remote-home/share/yifanlu/OpenCOODv2/vis_result/opv2v_0404"
+evaluate_pose_graph(data_dict, output_path, std=0.4)
 
 # output_path = "/GPFS/rhome/yifanlu/OpenCOOD/vis_result/box_align_dist_08"
 # evaluate_pose_graph(data_dict, output_path, std=0.8)

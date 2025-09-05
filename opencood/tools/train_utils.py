@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-# Author: Runsheng Xu <rxx3386@ucla.edu>, Hao Xiang <haxiang@g.ucla.edu>,
+# Author: Runsheng Xu <rxx3386@ucla.edu>, Hao Xiang <haxiang@g.ucla.edu>, Yifan Lu <yifan_lu@sjtu.edu.cn>
 # License: TDG-Attribution-NonCommercial-NoDistrib
 
 
 import glob
 import importlib
-from tkinter.messagebox import NO
 import yaml
 import os
 import re
@@ -17,7 +16,8 @@ import torch.optim as optim
 def backup_script(full_path, folders_to_save=["models", "data_utils", "utils", "loss"]):
     target_folder = os.path.join(full_path, 'scripts')
     if not os.path.exists(target_folder):
-        os.mkdir(target_folder)
+        if not os.path.exists(target_folder):
+            os.mkdir(target_folder)
     
     current_path = os.path.dirname(__file__)  # __file__ refer to this file, then the dirname is "?/tools"
 
@@ -26,7 +26,7 @@ def backup_script(full_path, folders_to_save=["models", "data_utils", "utils", "
         source_folder = os.path.join(current_path, f'../{folder_name}')
         shutil.copytree(source_folder, ttarget_folder)
 
-def load_saved_model(saved_path, model, epoch=None):
+def load_saved_model(saved_path, model):
     """
     Load saved model if exiseted
 
@@ -56,133 +56,23 @@ def load_saved_model(saved_path, model, epoch=None):
             initial_epoch_ = 0
         return initial_epoch_
 
-    # if os.path.exists(os.path.join(saved_path, 'net_latest.pth')):
-    #     model.load_state_dict(torch.load(os.path.join(saved_path, 'net_latest.pth')))
-    #file_list = glob.glob(os.path.join(saved_path, 'net_epoch_bestval_at*.pth'))
-    
-    if False:
-        pass
-    #if file_list:
-    #    assert len(file_list) == 1
-    #    model.load_state_dict(torch.load(file_list[0], map_location='cpu'), strict=False)
-    #    return eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at")), model
-    
-    #if os.path.exists(os.path.join(saved_path, 'net_epoch_bestval*.pth')):
-    #    model.load_state_dict(torch.load(os.path.join(saved_path, 'net_epoch_bestval*.pth')))
-    #    return 100, model
-    else:
-        if epoch is None:
-            initial_epoch = findLastCheckpoint(saved_path)
-        else:
-            initial_epoch = int(epoch)
-            
-        if initial_epoch > 0:
-            print('resuming by loading epoch %d' % initial_epoch)
-        
-        state_dict_ = torch.load(os.path.join(saved_path, 'net_epoch%d.pth' % initial_epoch))
-        state_dict = {}
-        # convert data_parallal to model
-        for k in state_dict_:
-            if k.startswith('module') and not k.startswith('module_list'):
-                state_dict[k[7:]] = state_dict_[k]
-            else:
-                state_dict[k] = state_dict_[k]
-        
-        model_state_dict = model.state_dict()
+    file_list = glob.glob(os.path.join(saved_path, 'net_epoch_bestval_at*.pth'))
+    if file_list:
+        assert len(file_list) == 1
+        print("resuming best validation model at epoch %d" % \
+                eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at")))
+        model.load_state_dict(torch.load(file_list[0] , map_location='cpu'), strict=False)
+        return eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at")), model
 
-        for k in state_dict:
-            if k in model_state_dict:
-                if state_dict[k].shape != model_state_dict[k].shape:
-                    print('Skip loading parameter {}, required shape{}, ' \
-                        'loaded shape{}.'.format(
-                        k, model_state_dict[k].shape, state_dict[k].shape))
-                    state_dict[k] = model_state_dict[k]
-            else:
-                print('Drop parameter {}.'.format(k))
-        for k in model_state_dict:
-            if not (k in state_dict):
-                print('No param {}.'.format(k))
-                state_dict[k] = model_state_dict[k]
-        model.load_state_dict(state_dict, strict=False)
-        return initial_epoch, model
-
-
-def load_model(saved_path, model, epoch=None, start_from_best=True):
-    """
-    Load saved model if exiseted
-
-    Parameters
-    __________
-    saved_path : str
-       model saved path
-    model : opencood object
-        The model instance.
-
-    Returns
-    -------
-    model : opencood object
-        The model instance loaded pretrained params.
-    """
-    assert os.path.exists(saved_path), '{} not found'.format(saved_path)
-
-    def findLastCheckpoint(save_dir):
-        file_list = glob.glob(os.path.join(save_dir, '*epoch*.pth'))
-        if file_list:
-            epochs_exist = []
-            for file_ in file_list:
-                result = re.findall(".*epoch(.*).pth.*", file_)
-                try:
-                    _epoch = int(result[0])
-                except Exception as e:
-                    pass
-                else:
-                    epochs_exist.append(_epoch)
-            initial_epoch_ = max(epochs_exist)
-        else:
-            initial_epoch_ = 0
-        return initial_epoch_
-
-    if epoch is not None:
-        initial_epoch = epoch
-    else:
-        if start_from_best:
-            file_list = glob.glob(os.path.join(saved_path, 'net_epoch_bestval_at*.pth'))
-            if file_list:
-                assert len(file_list) == 1
-                model.load_state_dict(torch.load(file_list[0], map_location='cpu'), strict=False)
-                return eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at")), model
-        initial_epoch = findLastCheckpoint(saved_path)
-            
+    initial_epoch = findLastCheckpoint(saved_path)
     if initial_epoch > 0:
         print('resuming by loading epoch %d' % initial_epoch)
-        
-    state_dict_ = torch.load(os.path.join(saved_path, 'net_epoch%d.pth' % initial_epoch))
-    state_dict = {}
-    # convert data_parallal to model
-    for k in state_dict_:
-        if k.startswith('module') and not k.startswith('module_list'):
-            state_dict[k[7:]] = state_dict_[k]
-        else:
-            state_dict[k] = state_dict_[k]
-    
-    model_state_dict = model.state_dict()
+        model.load_state_dict(torch.load(
+            os.path.join(saved_path,
+                         'net_epoch%d.pth' % initial_epoch), map_location='cpu'), strict=False)
 
-    for k in state_dict:
-        if k in model_state_dict:
-            if state_dict[k].shape != model_state_dict[k].shape:
-                print('Skip loading parameter {}, required shape{}, ' \
-                    'loaded shape{}.'.format(
-                    k, model_state_dict[k].shape, state_dict[k].shape))
-                state_dict[k] = model_state_dict[k]
-        else:
-            print('Drop parameter {}.'.format(k))
-    for k in model_state_dict:
-        if not (k in state_dict):
-            print('No param {}.'.format(k))
-            state_dict[k] = model_state_dict[k]
-    model.load_state_dict(state_dict, strict=False)
     return initial_epoch, model
-    
+
 
 def setup_train(hypes):
     """
@@ -205,13 +95,17 @@ def setup_train(hypes):
     full_path = os.path.join(current_path, folder_name)
 
     if not os.path.exists(full_path):
-        os.makedirs(full_path)
-        # save the yaml file
+        if not os.path.exists(full_path):
+            try:
+                os.makedirs(full_path)
+                backup_script(full_path)
+            except FileExistsError:
+                pass
         save_name = os.path.join(full_path, 'config.yaml')
         with open(save_name, 'w') as outfile:
             yaml.dump(hypes, outfile)
 
-    backup_script(full_path)
+        
 
     return full_path
 
@@ -237,12 +131,9 @@ def create_model(hypes):
     model_lib = importlib.import_module(model_filename)
     model = None
     target_model_name = backbone_name.replace('_', '')
-    print('model_lib: ', model_lib)
-    print('target_model_name: ', target_model_name)
 
     for name, cls in model_lib.__dict__.items():
         if name.lower() == target_model_name.lower():
-            print(name.lower(), cls)
             model = cls
 
     if model is None:
@@ -286,7 +177,7 @@ def create_loss(hypes):
               'called %s ignoring upper/lower case' % (loss_filename,
                                                        target_loss_name))
         exit(0)
-    
+
     criterion = loss_func(loss_func_config)
     return criterion
 
@@ -315,7 +206,7 @@ def setup_optimizer(hypes, model):
                                 lr=method_dict['lr'])
 
 
-def setup_lr_schedular(hypes, optimizer, init_epoch=None, n_iter_per_epoch=None):
+def setup_lr_schedular(hypes, optimizer, init_epoch=None):
     """
     Set up the learning rate schedular.
 
@@ -344,38 +235,13 @@ def setup_lr_schedular(hypes, optimizer, init_epoch=None, n_iter_per_epoch=None)
                                 milestones=milestones,
                                 gamma=gamma)
 
-    elif lr_schedule_config['core_method'] == 'exponential':
-        print('ExponentialLR is chosen for lr scheduler')
+    else:
         from torch.optim.lr_scheduler import ExponentialLR
         gamma = lr_schedule_config['gamma']
         scheduler = ExponentialLR(optimizer, gamma)
 
-    elif lr_schedule_config['core_method'] == 'cosineannealwarm':
-        print('cosine annealing is chosen for lr scheduler')
-        from timm.scheduler.cosine_lr import CosineLRScheduler
-
-        num_steps = lr_schedule_config['epoches'] * n_iter_per_epoch
-        warmup_lr = lr_schedule_config['warmup_lr']
-        warmup_steps = lr_schedule_config['warmup_epoches'] * n_iter_per_epoch
-        lr_min = lr_schedule_config['lr_min']
-
-        scheduler = CosineLRScheduler(
-            optimizer,
-            t_initial=num_steps,
-            lr_min=lr_min,
-            warmup_lr_init=warmup_lr,
-            warmup_t=warmup_steps,
-            cycle_limit=1,
-            t_in_epochs=False,
-        )
-    else:
-        sys.exit('not supported lr schedular')
-
-    for epoch in range(last_epoch):
-        if lr_schedule_config['core_method'] == 'cosineannealwarm':
-            scheduler.step(epoch)
-        else:
-            scheduler.step()
+    for _ in range(last_epoch):
+        scheduler.step()
 
     return scheduler
 
@@ -387,6 +253,6 @@ def to_device(inputs, device):
         return {k: to_device(v, device) for k, v in inputs.items()}
     else:
         if isinstance(inputs, int) or isinstance(inputs, float) \
-                or isinstance(inputs, str):
+                or isinstance(inputs, str) or not hasattr(inputs, 'to'):
             return inputs
-        return inputs.to(device)
+        return inputs.to(device, non_blocking=True)

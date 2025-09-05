@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Author: Runsheng Xu <rxx3386@ucla.edu>, Hao Xiang <haxiang@g.ucla.edu>,
+# Author: Yifan Lu <yifan_lu@sjtu.edu.cn>, Runsheng Xu <rxx3386@ucla.edu>, Hao Xiang <haxiang@g.ucla.edu>,
 # License: TDG-Attribution-NonCommercial-NoDistrib
 
 
@@ -10,16 +10,85 @@ Transformation utils
 from re import X
 import numpy as np
 import torch
-#from icecream import ic
+from icecream import ic
 from pyquaternion import Quaternion
 from opencood.utils.common_utils import check_numpy_to_torch
 
+def regroup(x, record_len):
+    cum_sum_len = torch.cumsum(record_len, dim=0)
+    split_x = torch.tensor_split(x, cum_sum_len[:-1].cpu())
+    return split_x
 
-__all__ = ['pose_to_tfm', 'tfm_to_pose', 'tfm_to_xycs_torch', 'xycs_to_tfm_torch', 'tfm_to_pose_torch', 'x_to_world',
-           'x1_to_x2', 'dist_to_continuous', 'get_pairwise_transformation_torch', 'get_relative_transformation',
-           'muilt_coord', 'veh_side_rot_and_trans_to_trasnformation_matrix', 'normalize_pairwise_tfm',
-           'inf_side_rot_and_trans_to_trasnformation_matrix', 'rot_and_trans_to_trasnformation_matrix']
+def get_pairwise_transformation(base_data_dict, max_cav, proj_first):
+    """
+    Get pair-wise transformation matrix accross different agents.
 
+    Parameters
+    ----------
+    base_data_dict : dict
+        Key : cav id, item: transformation matrix to ego, lidar points.
+
+    max_cav : int
+        The maximum number of cav, default 5
+
+    Return
+    ------
+    pairwise_t_matrix : np.array
+        The pairwise transformation matrix across each cav.
+        shape: (L, L, 4, 4), L is the max cav number in a scene
+        pairwise_t_matrix[i, j] is Tji, i_to_j
+    """
+    pairwise_t_matrix = np.tile(np.eye(4), (max_cav, max_cav, 1, 1)) # (L, L, 4, 4)
+
+    if proj_first:
+        # if lidar projected to ego first, then the pairwise matrix
+        # becomes identity
+        # no need to warp again in fusion time.
+
+        # pairwise_t_matrix[:, :] = np.identity(4)
+        return pairwise_t_matrix
+    else:
+        t_list = []
+
+        # save all transformation matrix in a list in order first.
+        for cav_id, cav_content in base_data_dict.items():
+            lidar_pose = cav_content['params']['lidar_pose']
+            t_list.append(x_to_world(lidar_pose))  # Twx
+
+        for i in range(len(t_list)):
+            for j in range(len(t_list)):
+                # identity matrix to self
+                if i != j:
+                    # i->j: TiPi=TjPj, Tj^(-1)TiPi = Pj
+                    # t_matrix = np.dot(np.linalg.inv(t_list[j]), t_list[i])
+                    t_matrix = np.linalg.solve(t_list[j], t_list[i])  # Tjw*Twi = Tji
+                    pairwise_t_matrix[i, j] = t_matrix
+
+    return pairwise_t_matrix
+
+def normalize_pairwise_tfm(pairwise_t_matrix, H, W, discrete_ratio, downsample_rate=1):
+    """
+    normalize the pairwise transformation matrix to affine matrix need by torch.nn.functional.affine_grid()
+
+    pairwise_t_matrix: torch.tensor
+        [B, L, L, 4, 4], B batchsize, L max_cav
+    H: num.
+        Feature map height
+    W: num.
+        Feature map width
+    discrete_ratio * downsample_rate: num.
+        One pixel on the feature map corresponds to the actual physical distance
+    """
+
+    pairwise_t_matrix = pairwise_t_matrix[:,:,:,[0, 1],:][:,:,:,:,[0, 1, 3]] # [B, L, L, 2, 3]
+    pairwise_t_matrix[...,0,1] = pairwise_t_matrix[...,0,1] * H / W
+    pairwise_t_matrix[...,1,0] = pairwise_t_matrix[...,1,0] * W / H
+    pairwise_t_matrix[...,0,2] = pairwise_t_matrix[...,0,2] / (downsample_rate * discrete_ratio * W) * 2
+    pairwise_t_matrix[...,1,2] = pairwise_t_matrix[...,1,2] / (downsample_rate * discrete_ratio * H) * 2
+
+    normalized_affine_matrix = pairwise_t_matrix
+
+    return normalized_affine_matrix
 
 def pose_to_tfm(pose):
     """ Transform batch of pose to tfm
@@ -344,29 +413,6 @@ def get_pairwise_transformation_torch(lidar_poses, max_cav, record_len, dof):
     return pairwise_t_matrix
 
 
-def normalize_pairwise_tfm(pairwise_t_matrix, H, W, discrete_ratio, downsample_rate=1):
-    """
-    normalize the pairwise transformation matrix to affine matrix need by torch.nn.functional.affine_grid()
-
-    pairwise_t_matrix: torch.tensor
-        [B, L, L, 4, 4], B batchsize, L max_cav
-    H: num.
-        Feature map height
-    W: num.
-        Feature map width
-    discrete_ratio * downsample_rate: num.
-        One pixel on the feature map corresponds to the actual physical distance
-    """
-
-    pairwise_t_matrix = pairwise_t_matrix[:,:,:,[0, 1],:][:,:,:,:,[0, 1, 3]] # [B, L, L, 2, 3]
-    pairwise_t_matrix[...,0,1] = pairwise_t_matrix[...,0,1] * H / W
-    pairwise_t_matrix[...,1,0] = pairwise_t_matrix[...,1,0] * W / H
-    pairwise_t_matrix[...,0,2] = pairwise_t_matrix[...,0,2] / (downsample_rate * discrete_ratio * W) * 2
-    pairwise_t_matrix[...,1,2] = pairwise_t_matrix[...,1,2] / (downsample_rate * discrete_ratio * H) * 2
-
-    return pairwise_t_matrix
-
-
 def get_relative_transformation(lidar_poses):
     """
     Args:
@@ -432,12 +478,10 @@ def inf_side_rot_and_trans_to_trasnformation_matrix(json_file,system_error_offse
 
     return matrix
 
-
-def rot_and_trans_to_trasnformation_matrix(lidar2camera_json_file):
-    matrix = np.empty([4, 4])
-    matrix[0:3, 0:3] = lidar2camera_json_file["rotation"]
-    translation = np.array(lidar2camera_json_file["translation"])
-    matrix[:, 3][0:3] = translation[:, 0]
+def rot_and_trans_to_trasnformation_matrix(json_file):
+    matrix = np.empty([4,4])
+    matrix[0:3, 0:3] = json_file["rotation"]
+    matrix[:, 3][0:3] = np.array(json_file["translation"])[:, 0]
     matrix[3, 0:3] = 0
     matrix[3, 3] = 1
 
