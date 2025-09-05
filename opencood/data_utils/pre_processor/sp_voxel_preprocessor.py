@@ -9,7 +9,8 @@ import sys
 
 import numpy as np
 import torch
-from cumm import tensorview as tv
+from icecream import ic
+
 from opencood.data_utils.pre_processor.base_preprocessor import \
     BasePreprocessor
 
@@ -24,9 +25,10 @@ class SpVoxelPreprocessor(BasePreprocessor):
             from spconv.utils import VoxelGeneratorV2 as VoxelGenerator
         except:
             # spconv v2.x
+            from cumm import tensorview as tv
             from spconv.utils import Point2VoxelCPU3d as VoxelGenerator
+            self.tv = tv
             self.spconv = 2
-
         self.lidar_range = self.params['cav_lidar_range']
         self.voxel_size = self.params['args']['voxel_size']
         self.max_points_per_voxel = self.params['args']['max_points_per_voxel']
@@ -62,10 +64,12 @@ class SpVoxelPreprocessor(BasePreprocessor):
         if self.spconv == 1:
             voxel_output = self.voxel_generator.generate(pcd_np)
         else:
-            pcd_tv = tv.from_numpy(pcd_np)
+            pcd_tv = self.tv.from_numpy(pcd_np)
             voxel_output = self.voxel_generator.point_to_voxel(pcd_tv)
         if isinstance(voxel_output, dict):
-            voxels, coordinates, num_points = voxel_output['voxels'], voxel_output['coordinates'], voxel_output['num_points_per_voxel']
+            voxels, coordinates, num_points = \
+                voxel_output['voxels'], voxel_output['coordinates'], \
+                voxel_output['num_points_per_voxel']
         else:
             voxels, coordinates, num_points = voxel_output
 
@@ -152,13 +156,17 @@ class SpVoxelPreprocessor(BasePreprocessor):
         processed_batch : dict
             Updated lidar batch.
         """
-        voxel_features = torch.from_numpy(np.concatenate(batch['voxel_features']))
-        voxel_num_points = torch.from_numpy(np.concatenate(batch['voxel_num_points']))
+        voxel_features = \
+            torch.from_numpy(np.concatenate(batch['voxel_features']))
+        voxel_num_points = \
+            torch.from_numpy(np.concatenate(batch['voxel_num_points']))
         coords = batch['voxel_coords']
         voxel_coords = []
 
         for i in range(len(coords)):
-            voxel_coords.append(np.pad(coords[i], ((0, 0), (1, 0)), mode='constant', constant_values=i))
+            voxel_coords.append(
+                np.pad(coords[i], ((0, 0), (1, 0)),
+                       mode='constant', constant_values=i))
         voxel_coords = torch.from_numpy(np.concatenate(voxel_coords))
 
         return {'voxel_features': voxel_features,

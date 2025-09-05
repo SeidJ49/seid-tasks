@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Author: Runsheng Xu <rxx3386@ucla.edu>
+# Author: Yifan Lu <yifan_lu@#sjtu.edu.cn>
 # License: TDG-Attribution-NonCommercial-NoDistrib
 
 
@@ -25,7 +25,7 @@ from icecream import ic
 
 def train_parser():
     parser = argparse.ArgumentParser(description="synthetic data generation")
-    parser.add_argument("--hypes_yaml", "-y", type=str, default="/GPFS/rhome/yifanlu/OpenCOOD/opencood/hypes_yaml/dair-v2x/uncertainty/pose_graph_pre_calc_dair.yaml",
+    parser.add_argument("--hypes_yaml", "-y", type=str, default="/root/OpenCOODv2/opencood/hypes_yaml/v2xset/lidar_only/coalign/precalc.yaml",
                         help='data generation yaml file needed ')
     parser.add_argument("--model_dir", type=str, default="")
     opt = parser.parse_args()
@@ -59,18 +59,12 @@ def main():
 
         print('Dataset Building')
         opencood_train_dataset = build_dataset(hypes, visualize=False, train=True)
-        # opencood_train_subset = Subset(opencood_train_dataset, [5578, 5572, 5103, 3048, 2445])
-        opencood_train_subset = opencood_train_dataset
-        # opencood_train_subset = Subset(opencood_train_dataset, [5876, 3328, 3338, 4956, 4957, 5079])
-        # ind = np.random.permutation(6000)[:100].tolist()
-        # opencood_train_subset = Subset(opencood_train_dataset, ind)
         opencood_validate_dataset = build_dataset(hypes, visualize=False, train=False)
-
         hypes_ = copy.deepcopy(hypes)
         hypes_['validate_dir'] = hypes_['test_dir']
         opencood_test_dataset = build_dataset(hypes_, visualize=False, train=False)
 
-        train_loader = DataLoader(opencood_train_subset,
+        train_loader = DataLoader(opencood_train_dataset,
                                 batch_size=1,
                                 num_workers=4,
                                 collate_fn=opencood_train_dataset.collate_batch_test,
@@ -95,17 +89,9 @@ def main():
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        proj_first = hypes['fusion']['args']['proj_first']
-        assert proj_first is False
-        # used to help schedule learning rate
-
-        ########################################################################
         ########################################################################
 
-        # from opencood.models.sub_modules.box_align import vis_pose_graph, box_alignment_relative_sample
-        # from opencood.utils.transformation_utils import get_pairwise_transformation_torch
-        hypes = yaml_utils.load_point_pillar_params_stage1(hypes)
-
+        hypes = yaml_utils.load_voxel_params(hypes)
 
         stage1_model_name = hypes['box_align_pre_calc']['stage1_model'] # point_pillar_disconet_teacher
         stage1_model_config = hypes['box_align_pre_calc']['stage1_model_config']
@@ -151,7 +137,11 @@ def main():
 
             stage1_boxes_dict = dict()
 
-            stage1_boxes_save_path = f"/GPFS/rhome/yifanlu/OpenCOOD/stage1_boxes/dair_new/{split}/stage1_boxes.json"
+            stage1_boxes_save_dir = f"{hypes['box_align_pre_calc']['output_save_path']}/{split}"
+            if not os.path.exists(stage1_boxes_save_dir):
+                os.makedirs(stage1_boxes_save_dir)
+            stage1_boxes_save_path = os.path.join(stage1_boxes_save_dir, "stage1_boxes.json")
+            
             for i, batch_data in enumerate(eval(f"{split}_loader")):
                 if batch_data is None:
                     continue

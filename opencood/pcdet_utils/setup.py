@@ -45,6 +45,8 @@ setup(
                 'src/sampling_gpu.cu',
                 'src/interpolate.cpp',
                 'src/interpolate_gpu.cu',
+                'src/voxel_query_gpu.cu',
+                'src/voxel_query.cpp'
             ],
         ),
         make_cuda_ext(

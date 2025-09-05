@@ -9,7 +9,6 @@ Utility functions related to point cloud
 
 import open3d as o3d
 import numpy as np
-# from pypcd.pypcd import pypcd
 from pypcd import pypcd
 
 def pcd_to_np(pcd_file):
@@ -58,8 +57,10 @@ def mask_points_by_range(points, limit_range):
     """
 
     mask = (points[:, 0] > limit_range[0]) & (points[:, 0] < limit_range[3])\
-           & (points[:, 1] > limit_range[1]) & (points[:, 1] < limit_range[4]) \
-           & (points[:, 2] > limit_range[2]) & (points[:, 2] < limit_range[5])
+           & (points[:, 1] > limit_range[1]) & (
+                   points[:, 1] < limit_range[4]) \
+           & (points[:, 2] > limit_range[2]) & (
+                   points[:, 2] < limit_range[5])
 
     points = points[mask]
 
@@ -202,12 +203,7 @@ def downsample_lidar_minimum(pcd_np_list):
     return pcd_np_list
 
 def read_pcd(pcd_path):
-    # x y z r g b intensity timestamp 每个点包含哪些维度
-    # xyz表示XYZ三维坐标，rgb表示颜色（可以分开表示，也可以一个浮点数表示），
-    # intensity表示激光反射强度，timestamp表示时间戳，normal_x、normal_y、normal_z表示平面法线三维坐标，j1、j2、j3表示不变矩。
     pcd = pypcd.PointCloud.from_path(pcd_path)
-    # print(pcd.metadata_keys)
-    # print(pcd.pc_data)
     time = None
     pcd_np_points = np.zeros((pcd.points, 4), dtype=np.float32)
     pcd_np_points[:, 0] = np.transpose(pcd.pc_data["x"])

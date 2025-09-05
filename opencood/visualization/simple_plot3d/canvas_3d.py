@@ -19,7 +19,7 @@ class Canvas_3D(object):
                 #  camera_center_coords=(-25, 0, 20),
                 #  camera_focus_coords=(-25 + 0.9396926, 0, 20 - 0.64202014),
                  focal_length=None,
-                 canvas_bg_color=(255, 255, 255), 
+                 canvas_bg_color=(0, 0, 0), 
                  left_hand=True):
         """
         Args:
@@ -104,7 +104,8 @@ class Canvas_3D(object):
             xyz[:,1] = - xyz[:,1]
 
         xyz = xyz[:,:3]
-        xyz_hom = np.concatenate([xyz, np.ones((xyz.shape[0], 1), dtype=np.float32)], axis=1)
+        xyz_hom = np.concatenate(
+            [xyz, np.ones((xyz.shape[0], 1), dtype=np.float32)], axis=1)
         img_pts = (self.int_matrix @ self.ext_matrix @ xyz_hom.T).T
 
         depth = img_pts[:, 2]
@@ -127,8 +128,7 @@ class Canvas_3D(object):
     def draw_canvas_points(self, 
                            canvas_xy,
                            radius=-1,
-                           # colors=None,
-                           colors=(128,64,0),
+                           colors=None,
                            colors_operand=None):
         """
         Draws canvas_xy onto self.canvas.
