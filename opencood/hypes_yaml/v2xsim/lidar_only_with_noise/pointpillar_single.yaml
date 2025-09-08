@@ -1,11 +1,11 @@
 name: v2xsim_point_pillar_lidar_late_fusion
-root_dir: "dataset/v2xsim2_info/v2xsim_infos_train.pkl"
-validate_dir: "dataset/v2xsim2_info/v2xsim_infos_val.pkl"
-test_dir: "dataset/v2xsim2_info/v2xsim_infos_test.pkl"
+root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences/man-truckscenes_sensordata_v1.0-mini/train.pkl"
+validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences/man-truckscenes_sensordata_v1.0-mini/train.pkl"
+test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences/man-truckscenes_sensordata_v1.0-mini/train.pkl"
 
 yaml_parser: "load_point_pillar_params"
 train_params:
-  batch_size: &batch_size 8
+  batch_size: &batch_size 1
   epoches: 15
   eval_freq: 2
   save_freq: 2
@@ -31,17 +31,9 @@ preprocess:
     max_voxel_train: 32000
     max_voxel_test: 70000
   # lidar range for each individual cav. Format: xyzxyz minmax
-  cav_lidar_range: &cav_lidar [-32, -32, -3, 32, 32, 2]
+  cav_lidar_range: &cav_lidar [-140.8, -40, -3, 140.8, 40, 1] #cav_lidar_range: &cav_lidar [-32, -32, -3, 32, 32, 2]
 
-data_augment:
-  - NAME: random_world_flip
-    ALONG_AXIS_LIST: [ 'x' ]
-
-  - NAME: random_world_rotation
-    WORLD_ROT_ANGLE: [ -0.78539816, 0.78539816 ]
-
-  - NAME: random_world_scaling
-    WORLD_SCALE_RANGE: [ 0.95, 1.05 ]
+data_augment: []
 
 # anchor box related
 postprocess:
