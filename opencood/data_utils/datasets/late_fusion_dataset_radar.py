@@ -40,8 +40,6 @@ class SingleVehicleDatasetRadar(Dataset):
         self.generate_object_center = self.generate_object_center_lidar
         self.generate_object_center_single = self.generate_object_center
 
-        self.add_data_extension = params['add_data_extension'] if 'add_data_extension' in params else []
-
         with open(self.root_dir, 'rb') as f:
             dataset_info = pickle.load(f)
         self.dataset_info_pkl = dataset_info
@@ -83,7 +81,6 @@ class SingleVehicleDatasetRadar(Dataset):
 
                 pose = tfm_to_pose(scene_info[f"lidar_pose_{cav_id}"]) # [x, y, z, roll, pitch, yaw]
                 self.scene_database[i][cav_id]['params']['lidar_pose'] = pose # [x, y, z, roll, pitch, yaw]
-                self.scene_database[i][cav_id]['params']['lidar_pose_clean'] = pose # [x, y, z, roll, pitch, yaw]
 
 
 
@@ -122,14 +119,12 @@ class SingleVehicleDatasetRadar(Dataset):
 
         ego_id = -1
         ego_lidar_pose = []
-        ego_lidar_pose_clean = []
         ego_base = None
 
         for cav_id, cav_content in base_data_dict.items():
             if cav_content['ego']:
                 ego_id = cav_id
                 ego_lidar_pose = cav_content['params']['lidar_pose']
-                ego_lidar_pose_clean = cav_content['params'].get('lidar_pose_clean', ego_lidar_pose)
                 ego_base = cav_content
                 break
 
@@ -137,12 +132,10 @@ class SingleVehicleDatasetRadar(Dataset):
         assert len(ego_lidar_pose) > 0
 
         transformation_matrix = x1_to_x2(ego_lidar_pose, ego_lidar_pose)
-        transformation_matrix_clean = x1_to_x2(ego_lidar_pose_clean, ego_lidar_pose_clean)
 
         ego_processed = self.get_item_single_car(ego_base)
         ego_processed.update({
             'transformation_matrix': transformation_matrix,
-            'transformation_matrix_clean': transformation_matrix_clean,
             'idx': idx,
             'cav_list': ['ego']
         })
@@ -182,8 +175,7 @@ class SingleVehicleDatasetRadar(Dataset):
     def get_item_single_car(self, selected_cav_base):
         selected_cav_processed = {}
 
-        ref_pose = selected_cav_base["params"].get("lidar_pose_clean",selected_cav_base["params"]["lidar_pose"])
-        object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center_single([selected_cav_base], ref_pose)
+        object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center_single([selected_cav_base], selected_cav_base["params"]["lidar_pose"])
 
         if self.load_lidar_file or self.visualize:
             lidar_np = selected_cav_base['lidar_np']
@@ -281,7 +273,6 @@ class SingleVehicleDatasetRadar(Dataset):
         })
 
         tm = torch.from_numpy(np.array(cav_content['transformation_matrix'])).float()
-        tmc = torch.from_numpy(np.array(cav_content['transformation_matrix_clean'])).float()
 
         output_dict[cav_id].update({
             'object_bbx_center': object_bbx_center,
@@ -289,7 +280,6 @@ class SingleVehicleDatasetRadar(Dataset):
             'label_dict': label_torch_dict,
             'object_ids': object_ids,
             'transformation_matrix': tm,
-            'transformation_matrix_clean': tmc
         })
 
         if self.visualize:

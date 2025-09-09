@@ -153,7 +153,7 @@ def main():
                 stage1_postprocessor.post_process_stage1(output_stage1, stage1_anchor_box)
                 record_len = batch_data['ego']['record_len']
                 lidar_pose = batch_data['ego']['lidar_pose']
-                lidar_pose_clean = batch_data['ego']['lidar_pose_clean']
+                lidar_pose_clean = batch_data['ego']['lidar_pose']
 
                 if pred_corner3d_list is None:
                     continue

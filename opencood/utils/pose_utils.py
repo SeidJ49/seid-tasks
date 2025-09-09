@@ -14,7 +14,7 @@ def add_noise_data_dict(data_dict, noise_setting):
     """
     if noise_setting['add_noise']:
         for cav_id, cav_content in data_dict.items():
-            cav_content['params']['lidar_pose_clean'] = cav_content['params']['lidar_pose'] # 6 dof pose
+            cav_content['params']['lidar_pose'] = cav_content['params']['lidar_pose'] # 6 dof pose
 
             if "laplace" in noise_setting['args'].keys() and noise_setting['args']['laplace'] is True:
                 cav_content['params']['lidar_pose'] = cav_content['params']['lidar_pose'] + \
@@ -35,7 +35,7 @@ def add_noise_data_dict(data_dict, noise_setting):
 
     else:
         for cav_id, cav_content in data_dict.items():
-            cav_content['params']['lidar_pose_clean'] = cav_content['params']['lidar_pose'] # 6 dof pose
+            cav_content['params']['lidar_pose'] = cav_content['params']['lidar_pose'] # 6 dof pose
 
             
     return data_dict

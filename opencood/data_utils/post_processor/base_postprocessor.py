@@ -71,7 +71,7 @@ class BasePostprocessor(object):
         for cav_id, cav_content in data_dict.items():
             # used to project gt bounding box to ego space
             # object_bbx_center is clean.
-            transformation_matrix = cav_content['transformation_matrix_clean']
+            transformation_matrix = cav_content['transformation_matrix']
 
             object_bbx_center = cav_content['object_bbx_center']
             object_bbx_mask = cav_content['object_bbx_mask']
@@ -139,7 +139,7 @@ class BasePostprocessor(object):
         for cav_id, cav_content in data_dict.items():
             # used to project gt bounding box to ego space
             # object_bbx_center is clean.
-            transformation_matrix = cav_content['transformation_matrix_clean']
+            transformation_matrix = cav_content['transformation_matrix']
 
             object_bbx_center = cav_content['object_bbx_center']
             object_bbx_mask = cav_content['object_bbx_mask']
@@ -462,7 +462,7 @@ class BasePostprocessor(object):
         filter_range = self.params['anchor_args']['cav_lidar_range'] # if self.train else GT_RANGE_OPV2V
         inf_filter_range = [-1e5, -1e5, -1e5, 1e5, 1e5, 1e5]
         visibility_map = np.asarray(cv2.cvtColor(cav_contents[0]["bev_visibility.png"], cv2.COLOR_BGR2GRAY))
-        ego_lidar_pose = cav_contents[0]["params"]["lidar_pose_clean"]
+        ego_lidar_pose = cav_contents[0]["params"]["lidar_pose"]
 
         # 1-time filter: in ego coordinate, use visibility map to filter.
         box_utils.project_world_visible_objects(tmp_object_dict,
