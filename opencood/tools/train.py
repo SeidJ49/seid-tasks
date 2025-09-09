@@ -23,7 +23,7 @@ def train_parser():
                         help='data generation yaml file needed ')
     parser.add_argument('--model_dir', default='',
                         help='Continued training path')
-    parser.add_argument('--fusion_method', '-f', default="intermediate",
+    parser.add_argument('--fusion_method', '-f', default="single",
                         help='passed to inference.')
     opt = parser.parse_args()
     return opt
