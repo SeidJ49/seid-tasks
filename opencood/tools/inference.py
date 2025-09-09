@@ -23,7 +23,7 @@ def test_parser():
     parser.add_argument('--model_dir', type=str, required=True,
                         help='Continued training path')
     parser.add_argument('--fusion_method', type=str,
-                        default='intermediate',
+                        default='single',
                         help='no, no_w_uncertainty, late, early or intermediate')
     parser.add_argument('--save_vis_interval', type=int, default=40,
                         help='interval of saving visualization')
@@ -214,13 +214,7 @@ def main():
                 #                     left_hand=left_hand)
                  
                 vis_save_path = os.path.join(vis_save_path_root, 'bev_%05d.png' % i)
-                simple_vis.visualize(infer_result,
-                                    batch_data['ego'][
-                                        'origin_lidar'][0],
-                                    hypes['postprocess']['gt_range'],
-                                    vis_save_path,
-                                    method='bev',
-                                    left_hand=left_hand)
+                simple_vis.visualize(infer_result,batch_data['ego']['origin_lidar'][0],hypes['postprocess']['gt_range'],vis_save_path,method='bev',left_hand=left_hand)
         torch.cuda.empty_cache()
 
     _, ap50, ap70 = eval_utils.eval_final_results(result_stat,
