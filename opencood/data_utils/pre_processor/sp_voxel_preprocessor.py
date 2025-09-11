@@ -9,16 +9,13 @@ import sys
 
 import numpy as np
 import torch
-from icecream import ic
 
-from opencood.data_utils.pre_processor.base_preprocessor import \
-    BasePreprocessor
+from opencood.data_utils.pre_processor.base_preprocessor import BasePreprocessor
 
 
 class SpVoxelPreprocessor(BasePreprocessor):
     def __init__(self, preprocess_params, train):
-        super(SpVoxelPreprocessor, self).__init__(preprocess_params,
-                                                  train)
+        super(SpVoxelPreprocessor, self).__init__(preprocess_params, train)
         self.spconv = 1
         try:
             # spconv v1.x
@@ -32,14 +29,14 @@ class SpVoxelPreprocessor(BasePreprocessor):
         self.lidar_range = self.params['cav_lidar_range']
         self.voxel_size = self.params['args']['voxel_size']
         self.max_points_per_voxel = self.params['args']['max_points_per_voxel']
+        self.num_point_features = self.params['args']['num_point_features']
 
         if train:
             self.max_voxels = self.params['args']['max_voxel_train']
         else:
             self.max_voxels = self.params['args']['max_voxel_test']
 
-        grid_size = (np.array(self.lidar_range[3:6]) -
-                     np.array(self.lidar_range[0:3])) / np.array(self.voxel_size)
+        grid_size = (np.array(self.lidar_range[3:6]) - np.array(self.lidar_range[0:3])) / np.array(self.voxel_size)
         self.grid_size = np.round(grid_size).astype(np.int64)
 
         # use sparse conv library to generate voxel
@@ -55,7 +52,7 @@ class SpVoxelPreprocessor(BasePreprocessor):
                 vsize_xyz=self.voxel_size,
                 coors_range_xyz=self.lidar_range,
                 max_num_points_per_voxel=self.max_points_per_voxel,
-                num_point_features=4,
+                num_point_features=self.num_point_features,
                 max_num_voxels=self.max_voxels
             )
 
@@ -67,9 +64,7 @@ class SpVoxelPreprocessor(BasePreprocessor):
             pcd_tv = self.tv.from_numpy(pcd_np)
             voxel_output = self.voxel_generator.point_to_voxel(pcd_tv)
         if isinstance(voxel_output, dict):
-            voxels, coordinates, num_points = \
-                voxel_output['voxels'], voxel_output['coordinates'], \
-                voxel_output['num_points_per_voxel']
+            voxels, coordinates, num_points = voxel_output['voxels'], voxel_output['coordinates'], voxel_output['num_points_per_voxel']
         else:
             voxels, coordinates, num_points = voxel_output
 
@@ -156,10 +151,8 @@ class SpVoxelPreprocessor(BasePreprocessor):
         processed_batch : dict
             Updated lidar batch.
         """
-        voxel_features = \
-            torch.from_numpy(np.concatenate(batch['voxel_features']))
-        voxel_num_points = \
-            torch.from_numpy(np.concatenate(batch['voxel_num_points']))
+        voxel_features = torch.from_numpy(np.concatenate(batch['voxel_features']))
+        voxel_num_points = torch.from_numpy(np.concatenate(batch['voxel_num_points']))
         coords = batch['voxel_coords']
         voxel_coords = []
 
