@@ -3,7 +3,6 @@ from collections import OrderedDict
 from typing import Dict
 from abc import abstractmethod
 import numpy as np
-from matplotlib import pyplot as plt
 from pypcd import pypcd
 import torch
 from torch.utils.data import Dataset
@@ -21,15 +20,7 @@ class SingleVehicleDatasetRadar(Dataset):
         self.visualize = visualize
         self.train = train
 
-        #self.save_id = 0
-
-        # Build preprocessors
-        lidar_feature_count = params['preprocess']['args']['lidar_num_point_features']
-        radar_feature_count = params['preprocess']['args']['radar_num_point_features']
-
-        self.lidar_pre_processor = build_preprocessor({**params['preprocess'], 'args': {**params['preprocess']['args'], 'num_point_features': lidar_feature_count}}, train)
-        self.radar_pre_processor = build_preprocessor({**params['preprocess'], 'args': {**params['preprocess']['args'], 'num_point_features': radar_feature_count}}, train)
-
+        self.pre_processor = build_preprocessor(params["preprocess"], train)
         self.post_processor = build_postprocessor(params["postprocess"], train)
 
         self.root_dir = params["root_dir"] if train else params["validate_dir"]
@@ -95,7 +86,6 @@ class SingleVehicleDatasetRadar(Dataset):
                 self.scene_database[i][cav_id]['params']['object_ids'] = scene_info[f'labels']['gt_object_ids'].tolist()
 
                 self.scene_database[i][cav_id]['params']['ego_pose'] = scene_info['agents']['1']['ego_pose']['transform']
-                self.scene_database[i][cav_id]['params']['ego_speed'] = scene_info['agents']['1']['ego_motion_chassis']
 
 
 
@@ -185,25 +175,14 @@ class SingleVehicleDatasetRadar(Dataset):
         data[f'{ego_cav_id}']['ego'] = True
         data[f'{ego_cav_id}']['params'] = cav_content['params']
 
-        # --------------------------------------------------------------------------------------------------------------
-
         # --- RADAR ----------------------------------------------------------------------------------------------------
         radar_points = []
         for sensor_name in cav_content['radar_sensors']:
             s = cav_content['sensors'][sensor_name]
-
-
-            # --- VELOCITY PROCESSING ----------------------------------------------------------------------------------
-            radar_np = self.pcd_to_npy_array(s['sensor_path']) # local coordinate
-            radar_transform = np.asarray(s['sensor_pose'])
-            lidar_velocity_xyz = np.array([cav_content['params']['ego_speed']['vx'],cav_content['params']['ego_speed']['vy'],cav_content['params']['ego_speed']['vz']])
-            lidar_transform = np.array(cav_content['params']['ego_pose'])
-
-            pts = self.process_all_radar_velocity(radar_np, radar_transform, lidar_velocity_xyz, lidar_transform)
-
-            # ----------------------------------------------------------------------------------------------------------
-            # Sensor -> Ego
+            pts = self.pcd_to_npy_array(s['sensor_path'])
             T = np.asarray(s['T_sensor_to_ego'], dtype=np.float64)  # (4,4)
+
+            # Sensor -> Ego
             xyz = pts[:, :3]
             xyz_h = np.concatenate([xyz, np.ones((xyz.shape[0], 1))], axis=1)
             xyz_ego = (T @ xyz_h.T).T[:, :3]
@@ -254,7 +233,7 @@ class SingleVehicleDatasetRadar(Dataset):
             lidar_np = mask_points_by_range(lidar_np, self.params['preprocess']['cav_lidar_range'])
             lidar_np = mask_ego_points(lidar_np)
 
-            lidar_dict = self.lidar_pre_processor.preprocess(lidar_np)
+            lidar_dict = self.pre_processor.preprocess(lidar_np)
             selected_cav_processed.update({'processed_lidar': lidar_dict})
         # --------------------------------------------------------------------------------------------------------------
 
@@ -265,14 +244,8 @@ class SingleVehicleDatasetRadar(Dataset):
             radar_np = mask_points_by_range(radar_np, self.params['preprocess']['cav_lidar_range'])
             radar_np = mask_ego_points(radar_np)
 
-            ## Speicherpfad zusammensetzen
-            #save_path = f"/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/opencood/bilder/{self.save_id}.png"
-            #self.save_radar_bev_png(radar_np, save_path)
-            #self.save_id += 1  # ID hochzählen
-
-            radar_dict = self.radar_pre_processor.preprocess(radar_np)
+            radar_dict = self.pre_processor.preprocess(radar_np)
             selected_cav_processed.update({'processed_radar': radar_dict})
-
 
 
         if self.visualize:
@@ -336,14 +309,14 @@ class SingleVehicleDatasetRadar(Dataset):
         if self.load_lidar_file:
             for i in range(len(batch)):
                 processed_lidar_list.append(batch[i]['ego']['processed_lidar'])
-            processed_lidar_torch_dict = self.lidar_pre_processor.collate_batch(processed_lidar_list)
+            processed_lidar_torch_dict = self.pre_processor.collate_batch(processed_lidar_list)
             output_dict['ego'].update({'processed_lidar': processed_lidar_torch_dict})
 
         # --- RADAR ----------------------------------------------------------------------------------------------------
         if self.load_lidar_file:
             for i in range(len(batch)):
                 processed_radar_list.append(batch[i]['ego']['processed_radar'])
-            processed_radar_torch_dict = self.radar_pre_processor.collate_batch(processed_radar_list)
+            processed_radar_torch_dict = self.pre_processor.collate_batch(processed_radar_list)
             output_dict['ego'].update({'processed_radar': processed_radar_torch_dict})
 
         return output_dict
@@ -369,12 +342,12 @@ class SingleVehicleDatasetRadar(Dataset):
         output_dict[cav_id].update({"anchor_box": self.anchor_box_torch})
 
         if self.load_lidar_file:
-            processed_lidar_torch_dict = self.lidar_pre_processor.collate_batch([cav_content['processed_lidar']])
+            processed_lidar_torch_dict = self.pre_processor.collate_batch([cav_content['processed_lidar']])
             output_dict[cav_id].update({'processed_lidar': processed_lidar_torch_dict})
 
         # --- RADAR ----------------------------------------------------------------------------------------------------
         if self.load_lidar_file:
-            processed_radar_torch_dict = self.radar_pre_processor.collate_batch([cav_content['processed_radar']])
+            processed_radar_torch_dict = self.pre_processor.collate_batch([cav_content['processed_radar']])
             output_dict[cav_id].update({'processed_radar': processed_radar_torch_dict})
 
 
@@ -424,6 +397,23 @@ class SingleVehicleDatasetRadar(Dataset):
         pred_box_tensor, pred_score, uncertainty = self.post_processor.post_process(data_dict_ego, output_dict_ego, return_uncertainty=True)
         return pred_box_tensor, pred_score, gt_box_tensor, uncertainty
 
+    # --- RADAR --------------------------------------------------------------------------------------------------------
+    @staticmethod
+    def pcd_to_npy_array(pcd_path):
+        radar = pypcd.PointCloud.from_path(pcd_path)
+        radar_data = radar.pc_data
+        points = np.array([
+            radar_data["x"],
+            radar_data["y"],
+            radar_data["z"],
+            radar_data["vrel_x"],
+            # radar_data["vrel_y"],
+            # radar_data["vrel_z"],
+            # radar_data["rcs"]
+        ], dtype=np.float64).T
+        return points
+
+    # ------------------------------------------------------------------------------------------------------------------
 
     # ---LIDAR ---------------------------------------------------------------------------------------------------------
     @staticmethod
@@ -437,102 +427,5 @@ class SingleVehicleDatasetRadar(Dataset):
             pc["intensity"]
         ], dtype=np.float64).T
         return points
-
-    # ------------------------------------------------------------------------------------------------------------------
-
-    # --- RADAR --------------------------------------------------------------------------------------------------------
-    @staticmethod
-    def pcd_to_npy_array(pcd_path):
-        radar = pypcd.PointCloud.from_path(pcd_path)
-        radar_data = radar.pc_data
-        points = np.array([
-            radar_data["x"],
-            radar_data["y"],
-            radar_data["z"],
-            radar_data["vrel_x"],
-            radar_data["vrel_y"],
-            radar_data["vrel_z"],
-            # radar_data["rcs"]
-        ], dtype=np.float64).T
-        return points
-
-
-    @staticmethod
-    def visualize_radar_bev(radar_np):
-        x = radar_np[:, 0]
-        y = radar_np[:, 1]
-        color = radar_np[:, 3]  # 4th column for color
-
-        plt.figure(figsize=(8, 8))
-        sc = plt.scatter(x, y, c=color, cmap='jet', s=1)
-        plt.colorbar(sc, label='Relative Velocity')
-        plt.xlabel('X (meters)')
-        plt.ylabel('Y (meters)')
-        plt.title('Radar Point Cloud BEV (Color: Relative Velocity)')
-        plt.axis('equal')
-        plt.show()
-
-    @staticmethod
-    def save_radar_bev_png(radar_np, save_path):
-        x = radar_np[:, 0]
-        y = radar_np[:, 1]
-        color = radar_np[:, 3]  # 4th column for color
-
-        # Masken für Rot und Grau
-        mask_red = (color > 0.8) | (color < -0.8)
-        mask_gray = ~mask_red
-
-        plt.figure(figsize=(8, 8))
-        # Grau zeichnen
-        plt.scatter(x[mask_gray], y[mask_gray], color='gray', s=1)
-        # Rot zeichnen
-        plt.scatter(x[mask_red], y[mask_red], color='red', s=1)
-
-        plt.xlabel('X (meters)')
-        plt.ylabel('Y (meters)')
-        plt.title('Radar Point Cloud BEV (Red: |Rel. Vel| > 0.5, Gray: else)')
-        plt.axis('equal')
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close()
-
-    @staticmethod
-    def process_all_radar_velocity(radar_np, radar_transform, lidar_velocity_xyz, lidar_transform):
-        # TODO: roll, yaw, pitch hinzufügen (kurven)
-
-        l2r_transform = x1_to_x2(lidar_transform, radar_transform)
-        l2r_rotation_matrix = l2r_transform[:3, :3]
-        radar_velocity_xyz = np.dot(l2r_rotation_matrix, lidar_velocity_xyz)
-
-        radar_np = radar_np.copy()
-
-        r = np.sqrt(radar_np[:, 0] ** 2 + radar_np[:, 1] ** 2)
-        r_safe = np.where(r == 0, 1, r)
-        ux = radar_np[:, 0] / r_safe
-        uy = radar_np[:, 1] / r_safe
-        uz = radar_np[:, 2] / r_safe
-
-        v_rel_vec = radar_np[:, 3:6]
-        v_rel = v_rel_vec[:, 0] * ux + v_rel_vec[:, 1] * uy + v_rel_vec[:, 2] * uz
-
-        # Compute radial speed from ego motion and sum with relative velocity
-        v_ego_radial = radar_velocity_xyz[0] * ux + radar_velocity_xyz[1] * uy + radar_velocity_xyz[2] * uz
-        v_r = v_rel + v_ego_radial
-
-        # Decompose radial speed into x and y components
-        beta = np.arctan2(radar_np[:, 1], radar_np[:, 0])
-        v_r_x = np.cos(beta) * v_r
-        v_r_y = np.sin(beta) * v_r
-
-        # Normalize the computed velocities (clip to [-12.5, 12.5] and scale to [-1, 1])
-        v_rel_norm = np.clip(v_rel, -12.5, 12.5) / 12.5
-        v_r_norm = np.clip(v_r, -12.5, 12.5) / 12.5
-        v_r_x_norm = np.clip(v_r_x, -12.5, 12.5) / 12.5
-        v_r_y_norm = np.clip(v_r_y, -12.5, 12.5) / 12.5
-
-        #result_np = np.column_stack(
-        #    (radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel_norm, v_r_norm, v_r_x_norm, v_r_y_norm))
-        #result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_r_norm))
-        result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel))
-        return result_np
 
     # ------------------------------------------------------------------------------------------------------------------

@@ -18,17 +18,18 @@ class PointPillar(nn.Module):
     def __init__(self, args):
         super(PointPillar, self).__init__()
 
-        # PIllar VFE
-        self.pillar_vfe = PillarVFE(args['pillar_vfe'],
-                                    num_point_features=4,
-                                    voxel_size=args['voxel_size'],
-                                    point_cloud_range=args['lidar_range'])
+        # PILLAR VFE
+        self.lidar_pillar_vfe = PillarVFE(args['pillar_vfe'], num_point_features=4, voxel_size=args['voxel_size'], point_cloud_range=args['lidar_range'])
         self.scatter = PointPillarScatter(args['point_pillar_scatter'])
+
+        self.radar_pillar_vfe = PillarVFE(args['pillar_vfe'], num_point_features=4, voxel_size=args['voxel_size'], point_cloud_range=args['lidar_range'])
+
         is_resnet = args['base_bev_backbone'].get("resnet", False)
         if is_resnet:
-            self.backbone = ResNetBEVBackbone(args['base_bev_backbone'], 64) # or you can use ResNetBEVBackbone, which is stronger
+            self.backbone = ResNetBEVBackbone(args['base_bev_backbone'], 128) # or you can use ResNetBEVBackbone, which is stronger
         else:
-            self.backbone = BaseBEVBackbone(args['base_bev_backbone'], 64) # or you can use ResNetBEVBackbone, which is stronger
+            self.backbone = BaseBEVBackbone(args['base_bev_backbone'], 128) # or you can use ResNetBEVBackbone, which is stronger
+
         self.out_channel = sum(args['base_bev_backbone']['num_upsample_filter'])
 
         self.shrink_flag = False
@@ -51,16 +52,38 @@ class PointPillar(nn.Module):
 
     def forward(self, data_dict):
 
-        voxel_features = data_dict['processed_lidar']['voxel_features']
-        voxel_coords = data_dict['processed_lidar']['voxel_coords']
-        voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
+        # --- LiDAR ----------------------------------------------------------------------------------------------------
+        lidar_voxel_features = data_dict['processed_lidar']['voxel_features']
+        lidar_voxel_coords = data_dict['processed_lidar']['voxel_coords']
+        lidar_voxel_num_points = data_dict['processed_lidar']['voxel_num_points']
 
-        batch_dict = {'voxel_features': voxel_features,
-                      'voxel_coords': voxel_coords,
-                      'voxel_num_points': voxel_num_points}
+        lidar_batch_dict = {'voxel_features': lidar_voxel_features,
+                            'voxel_coords': lidar_voxel_coords,
+                            'voxel_num_points': lidar_voxel_num_points}
 
-        batch_dict = self.pillar_vfe(batch_dict)
-        batch_dict = self.scatter(batch_dict)
+        # --------------------------------------------------------------------------------------------------------------
+
+        # --- RADAR ----------------------------------------------------------------------------------------------------
+        radar_voxel_features = data_dict['processed_radar']['voxel_features']
+        radar_voxel_coords = data_dict['processed_radar']['voxel_coords']
+        radar_voxel_num_points = data_dict['processed_radar']['voxel_num_points']
+
+        radar_batch_dict = {'voxel_features': radar_voxel_features,
+                            'voxel_coords': radar_voxel_coords,
+                            'voxel_num_points': radar_voxel_num_points}
+
+        # --------------------------------------------------------------------------------------------------------------
+
+        lidar_batch_dict = self.lidar_pillar_vfe(lidar_batch_dict)
+        lidar_batch_dict = self.scatter(lidar_batch_dict)
+
+        radar_batch_dict = self.radar_pillar_vfe(radar_batch_dict)
+        radar_batch_dict = self.scatter(radar_batch_dict)
+
+        batch_dict = {
+            'spatial_features': torch.cat([lidar_batch_dict['spatial_features'], radar_batch_dict['spatial_features']], dim=1),
+        }
+
         batch_dict = self.backbone(batch_dict)
 
         spatial_features_2d = batch_dict['spatial_features_2d']

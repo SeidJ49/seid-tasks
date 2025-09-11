@@ -1,12 +1,12 @@
 name: pointpillar_single
-root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetV2XSim2.0Mini/v2xsim_infos_train.pkl"
-validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetV2XSim2.0Mini/v2xsim_infos_val.pkl"
-test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetV2XSim2.0Mini/v2xsim_infos_test.pkl"
+root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
+validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
+test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
 
 yaml_parser: "load_point_pillar_params"
 train_params:
   batch_size: &batch_size 8
-  epoches: 30
+  epoches: 50
   eval_freq: 1
   save_freq: 1
 
@@ -30,8 +30,10 @@ preprocess:
     max_points_per_voxel: 32
     max_voxel_train: 32000
     max_voxel_test: 70000
+    lidar_num_point_features: 4 # for xyz and intensity
+    radar_num_point_features: 4 # for xyz and v_rel or 7 for xyz, v_rel_x, v_rel_y,, v_rel_z,  rcs
   # lidar range for each individual cav. Format: xyzxyz minmax
-  cav_lidar_range: &cav_lidar [-32, -32, -3, 32, 32, 2]
+  cav_lidar_range: &cav_lidar [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0] # [-32, -32, -3, 32, 32, 2] # [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
 
 data_augment: []
 
