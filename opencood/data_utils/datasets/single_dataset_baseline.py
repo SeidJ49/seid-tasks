@@ -3,7 +3,6 @@ from collections import OrderedDict
 from typing import Dict
 from abc import abstractmethod
 import numpy as np
-from matplotlib import pyplot as plt
 from pypcd import pypcd
 import torch
 from torch.utils.data import Dataset
@@ -14,7 +13,7 @@ from opencood.data_utils.post_processor import build_postprocessor
 from opencood.utils.pcd_utils import mask_points_by_range
 
 
-class SingleVehicleDatasetRadar(Dataset):
+class SingleDatasetBaseline(Dataset):
 
     def __init__(self,params: Dict, visualize: bool = False, train: bool = True):
         self.params = params
@@ -23,24 +22,31 @@ class SingleVehicleDatasetRadar(Dataset):
 
         #self.save_id = 0
 
-        # Build preprocessors
-        lidar_feature_count = params['preprocess']['args']['lidar_num_point_features']
-        radar_feature_count = params['preprocess']['args']['radar_num_point_features']
+        self.ref_frame = params.get('ref_frame', 'ego_pose') # 'lidar_top_front_pose' or 'ego_pose'
 
-        self.lidar_pre_processor = build_preprocessor({**params['preprocess'], 'args': {**params['preprocess']['args'], 'num_point_features': lidar_feature_count}}, train)
-        self.radar_pre_processor = build_preprocessor({**params['preprocess'], 'args': {**params['preprocess']['args'], 'num_point_features': radar_feature_count}}, train)
+        # Build preprocessors
+        # --- LIDAR ----------------------------------------------------------------------------------------------------
+        lidar_feature_count = params['preprocess']['args']['lidar_num_point_features']
+        lidar_args = {**params['preprocess']['args'], 'num_point_features': lidar_feature_count}
+        self.lidar_pre_processor = build_preprocessor({**params['preprocess'], 'args': lidar_args}, train)
+        # --------------------------------------------------------------------------------------------------------------
+
+        # --- RADAR ----------------------------------------------------------------------------------------------------
+        radar_feature_count = params['preprocess']['args']['radar_num_point_features']
+        radar_args = {**params['preprocess']['args'],
+                      'max_points_per_voxel': params['preprocess']['args']['radar_max_points_per_voxel'],
+                      'max_voxel_train': params['preprocess']['args']['radar_max_voxel_train'],
+                      'max_voxel_test': params['preprocess']['args']['radar_max_voxel_test'],
+                      'num_point_features': radar_feature_count}
+        self.radar_pre_processor = build_preprocessor({**params['preprocess'], 'args': radar_args}, train)
+        # --------------------------------------------------------------------------------------------------------------
 
         self.post_processor = build_postprocessor(params["postprocess"], train)
 
         self.root_dir = params["root_dir"] if train else params["validate_dir"]
         print("Dataset dir:", self.root_dir)
 
-        if 'train_params' not in params or 'max_cav' not in params['train_params']:
-            self.max_cav = 5
-        else:
-            self.max_cav = params['train_params']['max_cav']
-
-        self.load_lidar_file = True if 'lidar' in params['input_source'] or self.visualize else False # TODO: also for radar but its fine for now
+        self.load_lidar_file = True if 'lidar' in params['input_source'] or self.visualize else False
 
         self.label_type = params['label_type']
         assert self.label_type in ['lidar']
@@ -48,60 +54,69 @@ class SingleVehicleDatasetRadar(Dataset):
         self.generate_object_center = self.generate_object_center_lidar
         self.generate_object_center_single = self.generate_object_center
 
+        self.ego_mode = 'one'
+
         with open(self.root_dir, 'rb') as f:
             dataset_info = pickle.load(f)
         self.dataset_info_pkl = dataset_info
-
-        self.ego_mode = 'one'
 
         self.reinitialize()
 
         self.anchor_box = self.post_processor.generate_anchor_box()
         self.anchor_box_torch = torch.from_numpy(self.anchor_box)
 
-
     def reinitialize(self):
         self.scene_database = OrderedDict()
-        if self.ego_mode == 'one':
-            self.len_record = len(self.dataset_info_pkl)
-        else:
-            raise NotImplementedError(self.ego_mode)
+        self.len_record = []
 
-        for i, scene_info in enumerate(self.dataset_info_pkl):
-            self.scene_database.update({i: OrderedDict()})
-            cav_num = scene_info['agent_num']
-            assert cav_num > 0
+        scene_counter = 0
+        total = 0
+        for scene_token, samples in self.dataset_info_pkl.items():
+            self.scene_database[scene_counter] = OrderedDict()
+            for sample_idx, sample in enumerate(samples):
+                cav_id = 1
+                self.scene_database[scene_counter].setdefault(cav_id, OrderedDict())
+                self.scene_database[scene_counter][cav_id][sample_idx] = OrderedDict()
 
-            cav_ids = list(range(1, cav_num + 1))
+                cav_entry = self.scene_database[scene_counter][cav_id][sample_idx]
+                cav_entry['ego'] = True
+                cav_entry['sensors'] = sample['agents']['1']['sensors']
 
-            for j, cav_id in enumerate(cav_ids):
-                if j > self.max_cav - 1:
-                    print('too many cavs reinitialize')
-                    break
+                radar_list = [k for k, v in cav_entry['sensors'].items() if v.get('sensor_type') == 'radar']
+                lidar_list = [k for k, v in cav_entry['sensors'].items() if v.get('sensor_type') == 'lidar']
+                cav_entry['radar_sensors'] = radar_list
+                cav_entry['lidar_sensors'] = lidar_list
 
-                self.scene_database[i][cav_id] = OrderedDict()
-                self.scene_database[i][cav_id]['ego'] = (cav_id == 1)
+                cav_entry['params'] = OrderedDict()
+                cav_entry['params']['vehicles'] = sample['labels']['gt_boxes_global']
+                cav_entry['params']['object_ids'] = sample['labels']['gt_object_ids'].tolist()
+                cav_entry['params']['ego_pose'] = sample['agents']['1']['ego_pose']['transform']
+                cav_entry['params']['lidar_top_front_pose'] = sample['agents']['1']['lidar_top_front_pose']['transform']
+                # cav_entry['params']['ego_speed'] = sample['agents']['1']['ego_motion_chassis']
+                cav_entry['params']['ego_speed'] = sample['agents']['1']['ego_motion_cabin']
 
-                sensors_dict = scene_info['agents']['1']['sensors']
-                self.scene_database[i][cav_id]['sensors'] = sensors_dict
-                radar_list = [k for k, v in sensors_dict.items() if v.get('sensor_type') == 'radar']
-                lidar_list = [k for k, v in sensors_dict.items() if v.get('sensor_type') == 'lidar']
-                self.scene_database[i][cav_id]['radar_sensors'] = radar_list
-                self.scene_database[i][cav_id]['lidar_sensors'] = lidar_list
+                total += 1
 
+            scene_counter += 1
+            self.len_record.append(total)
 
-                self.scene_database[i][cav_id]['params'] = OrderedDict()
-                self.scene_database[i][cav_id]['params']['vehicles'] = scene_info[f'labels']['gt_boxes_global']
-                self.scene_database[i][cav_id]['params']['object_ids'] = scene_info[f'labels']['gt_object_ids'].tolist()
+    def get_ref_pose(self, cav_params):
+        if self.ref_frame == 'lidar_top_front_pose':
+            return cav_params['lidar_top_front_pose']
+        return cav_params['ego_pose']
 
-                self.scene_database[i][cav_id]['params']['ego_pose'] = scene_info['agents']['1']['ego_pose']['transform']
-                self.scene_database[i][cav_id]['params']['ego_speed'] = scene_info['agents']['1']['ego_motion_chassis']
+    def T_sensor_to_ref(self, sensor_entry, cav_params):
+        T_sego = np.asarray(sensor_entry['T_sensor_to_ego'], dtype=np.float64)
+        if self.ref_frame == 'ego_pose':
+            return T_sego
 
+        ego_pose = np.asarray(cav_params['ego_pose'], dtype=np.float64)
+        lidar_pose = np.asarray(cav_params['lidar_top_front_pose'], dtype=np.float64)
+        T_ego_to_lidar = x1_to_x2(ego_pose, lidar_pose)
+        return T_ego_to_lidar @ T_sego
 
-
-    def __len__(self) -> int:
-        return self.len_record
-
+    def __len__(self):
+        return self.len_record[-1]
 
     @abstractmethod
     def __getitem__(self, idx):
@@ -138,20 +153,20 @@ class SingleVehicleDatasetRadar(Dataset):
         processed_data_dict = OrderedDict()
 
         ego_id = -1
-        ego_pose = []
+        ref_pose = []
         ego_base = None
 
         for cav_id, cav_content in base_data_dict.items():
             if cav_content['ego']:
                 ego_id = cav_id
-                ego_pose = cav_content['params']['ego_pose']
+                ref_pose = self.get_ref_pose(cav_content['params'])
                 ego_base = cav_content
                 break
 
         assert ego_id != -1
-        assert len(ego_pose) > 0
+        assert len(ref_pose) > 0
 
-        transformation_matrix = x1_to_x2(ego_pose, ego_pose)
+        transformation_matrix = x1_to_x2(ref_pose, ref_pose)
 
         ego_processed = self.get_item_single_car(ego_base)
 
@@ -170,17 +185,19 @@ class SingleVehicleDatasetRadar(Dataset):
 
 
     def retrieve_base_data(self, idx):
-        data = OrderedDict()
-        scene = self.scene_database[idx]
 
-        ego_cav_id = None
-        for cav_id, cav_content in scene.items():
-            if cav_content['ego']:
-                ego_cav_id = cav_id
+        scene_index = 0
+        for i, end_idx in enumerate(self.len_record):
+            if idx < end_idx:
+                scene_index = i
                 break
-        assert ego_cav_id is not None
 
-        cav_content = scene[ego_cav_id]
+        sample_index = idx if scene_index == 0 else idx - self.len_record[scene_index - 1]
+
+        ego_cav_id = 1
+        cav_content = self.scene_database[scene_index][ego_cav_id][sample_index]
+
+        data = OrderedDict()
         data[f'{ego_cav_id}'] = OrderedDict()
         data[f'{ego_cav_id}']['ego'] = True
         data[f'{ego_cav_id}']['params'] = cav_content['params']
@@ -197,17 +214,17 @@ class SingleVehicleDatasetRadar(Dataset):
             radar_np = self.pcd_to_npy_array(s['sensor_path']) # local coordinate
             radar_transform = np.asarray(s['sensor_pose'])
             lidar_velocity_xyz = np.array([cav_content['params']['ego_speed']['vx'],cav_content['params']['ego_speed']['vy'],cav_content['params']['ego_speed']['vz']])
-            lidar_transform = np.array(cav_content['params']['ego_pose'])
+            ref_vehicle_pose = np.array(self.get_ref_pose(cav_content['params']))
 
-            pts = self.process_all_radar_velocity(radar_np, radar_transform, lidar_velocity_xyz, lidar_transform)
+            pts = self.process_all_radar_velocity(radar_np, radar_transform, lidar_velocity_xyz, ref_vehicle_pose)
 
             # ----------------------------------------------------------------------------------------------------------
-            # Sensor -> Ego
-            T = np.asarray(s['T_sensor_to_ego'], dtype=np.float64)  # (4,4)
+            # Sensor -> Ref
+            T = self.T_sensor_to_ref(s, cav_content['params'])
             xyz = pts[:, :3]
             xyz_h = np.concatenate([xyz, np.ones((xyz.shape[0], 1))], axis=1)
-            xyz_ego = (T @ xyz_h.T).T[:, :3]
-            pts[:, :3] = xyz_ego
+            xyz_ref = (T @ xyz_h.T).T[:, :3]
+            pts[:, :3] = xyz_ref
 
             radar_points.append(pts)
         # --------------------------------------------------------------------------------------------------------------
@@ -217,14 +234,13 @@ class SingleVehicleDatasetRadar(Dataset):
         for sensor_name in cav_content['lidar_sensors']:
             s = cav_content['sensors'][sensor_name]
             pts = self.pcd_to_npy_array_lidar(s['sensor_path'])
-            T = np.asarray(s['T_sensor_to_ego'], dtype=np.float64)
+            T = self.T_sensor_to_ref(s, cav_content['params'])
 
             # Sensor -> Ego
             xyz = pts[:, :3]
             xyz_h = np.concatenate([xyz, np.ones((xyz.shape[0], 1))], axis=1)
-            xyz_ego = (T @ xyz_h.T).T[:, :3]
-            pts[:, :3] = xyz_ego
-
+            xyz_ref= (T @ xyz_h.T).T[:, :3]
+            pts[:, :3] = xyz_ref
             lidar_points.append(pts)
         # --------------------------------------------------------------------------------------------------------------
         data[f'{ego_cav_id}']['lidar_np'] = np.vstack(lidar_points)
@@ -240,7 +256,8 @@ class SingleVehicleDatasetRadar(Dataset):
     def get_item_single_car(self, selected_cav_base):
         selected_cav_processed = {}
 
-        object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center_single([selected_cav_base], selected_cav_base["params"]["ego_pose"])
+        ref_pose = self.get_ref_pose(selected_cav_base['params'])
+        object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center_single([selected_cav_base], ref_pose)
 
         # No Cars
         if len(object_ids) == 0:
@@ -252,7 +269,7 @@ class SingleVehicleDatasetRadar(Dataset):
             lidar_np = selected_cav_base['lidar_np']
             lidar_np = shuffle_points(lidar_np)
             lidar_np = mask_points_by_range(lidar_np, self.params['preprocess']['cav_lidar_range'])
-            lidar_np = mask_ego_points(lidar_np)
+            lidar_np = mask_ego_points(lidar_np) # FIXME: check it
 
             lidar_dict = self.lidar_pre_processor.preprocess(lidar_np)
             selected_cav_processed.update({'processed_lidar': lidar_dict})
@@ -263,7 +280,7 @@ class SingleVehicleDatasetRadar(Dataset):
             radar_np = selected_cav_base['radar_np']
             radar_np = shuffle_points(radar_np)
             radar_np = mask_points_by_range(radar_np, self.params['preprocess']['cav_lidar_range'])
-            radar_np = mask_ego_points(radar_np)
+            radar_np = mask_ego_points(radar_np) # FIXME: check it
 
             ## Speicherpfad zusammensetzen
             #save_path = f"/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/opencood/bilder/{self.save_id}.png"
@@ -457,65 +474,24 @@ class SingleVehicleDatasetRadar(Dataset):
         return points
 
 
-    @staticmethod
-    def visualize_radar_bev(radar_np):
-        x = radar_np[:, 0]
-        y = radar_np[:, 1]
-        color = radar_np[:, 3]  # 4th column for color
-
-        plt.figure(figsize=(8, 8))
-        sc = plt.scatter(x, y, c=color, cmap='jet', s=1)
-        plt.colorbar(sc, label='Relative Velocity')
-        plt.xlabel('X (meters)')
-        plt.ylabel('Y (meters)')
-        plt.title('Radar Point Cloud BEV (Color: Relative Velocity)')
-        plt.axis('equal')
-        plt.show()
-
-    @staticmethod
-    def save_radar_bev_png(radar_np, save_path):
-        x = radar_np[:, 0]
-        y = radar_np[:, 1]
-        color = radar_np[:, 3]  # 4th column for color
-
-        # Masken für Rot und Grau
-        mask_red = (color > 0.8) | (color < -0.8)
-        mask_gray = ~mask_red
-
-        plt.figure(figsize=(8, 8))
-        # Grau zeichnen
-        plt.scatter(x[mask_gray], y[mask_gray], color='gray', s=1)
-        # Rot zeichnen
-        plt.scatter(x[mask_red], y[mask_red], color='red', s=1)
-
-        plt.xlabel('X (meters)')
-        plt.ylabel('Y (meters)')
-        plt.title('Radar Point Cloud BEV (Red: |Rel. Vel| > 0.5, Gray: else)')
-        plt.axis('equal')
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close()
-
-    @staticmethod
-    def process_all_radar_velocity(radar_np, radar_transform, lidar_velocity_xyz, lidar_transform):
-        # TODO: roll, yaw, pitch hinzufügen (kurven)
-
+    def process_all_radar_velocity(self, radar_np, radar_transform, lidar_velocity_xyz, lidar_transform):
         l2r_transform = x1_to_x2(lidar_transform, radar_transform)
         l2r_rotation_matrix = l2r_transform[:3, :3]
         radar_velocity_xyz = np.dot(l2r_rotation_matrix, lidar_velocity_xyz)
-
         radar_np = radar_np.copy()
 
-        r = np.sqrt(radar_np[:, 0] ** 2 + radar_np[:, 1] ** 2)
-        r_safe = np.where(r == 0, 1, r)
-        ux = radar_np[:, 0] / r_safe
-        uy = radar_np[:, 1] / r_safe
-        uz = radar_np[:, 2] / r_safe
+        r = np.linalg.norm(radar_np[:, :3], axis=1)
+        r_safe = np.where(r == 0, 1e-6, r)
+        # ux = radar_np[:, 0] / r_safe
+        # uy = radar_np[:, 1] / r_safe
+        # uz = radar_np[:, 2] / r_safe
+        unit_vec = radar_np[:, :3] / r_safe[:, None]
 
         v_rel_vec = radar_np[:, 3:6]
-        v_rel = v_rel_vec[:, 0] * ux + v_rel_vec[:, 1] * uy + v_rel_vec[:, 2] * uz
+        v_rel = np.matmul(v_rel_vec, unit_vec.T).diagonal()
 
         # Compute radial speed from ego motion and sum with relative velocity
-        v_ego_radial = radar_velocity_xyz[0] * ux + radar_velocity_xyz[1] * uy + radar_velocity_xyz[2] * uz
+        v_ego_radial = unit_vec @ radar_velocity_xyz
         v_r = v_rel + v_ego_radial
 
         # Decompose radial speed into x and y components
@@ -524,15 +500,53 @@ class SingleVehicleDatasetRadar(Dataset):
         v_r_y = np.sin(beta) * v_r
 
         # Normalize the computed velocities (clip to [-12.5, 12.5] and scale to [-1, 1])
-        v_rel_norm = np.clip(v_rel, -12.5, 12.5) / 12.5
-        v_r_norm = np.clip(v_r, -12.5, 12.5) / 12.5
-        v_r_x_norm = np.clip(v_r_x, -12.5, 12.5) / 12.5
-        v_r_y_norm = np.clip(v_r_y, -12.5, 12.5) / 12.5
+        v_rel_norm = self.normalize_velocity(v_rel)
+        v_r_norm = self.normalize_velocity(v_r)
+        v_r_x_norm = self.normalize_velocity(v_r_x)
+        v_r_y_norm = self.normalize_velocity(v_r_y)
 
-        #result_np = np.column_stack(
-        #    (radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel_norm, v_r_norm, v_r_x_norm, v_r_y_norm))
-        #result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_r_norm))
+        #result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel_norm, v_r_norm, v_r_x_norm, v_r_y_norm))
+        # result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_r_norm))
+        # result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_r_norm))
         result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel))
         return result_np
+
+    @staticmethod
+    def normalize_velocity(v: np.ndarray, method: str = "zscore") -> np.ndarray:
+        """
+        Normalize 1D velocity array.
+
+        Parameters
+        ----------
+        v : np.ndarray
+            Input velocity array of shape (N,).
+        method : str, optional
+            Normalization method, one of:
+            - "zscore"  : (v - mean) / std
+            - "robust"  : (v - median) / IQR (interquartile range)
+
+        Returns
+        -------
+        v_norm : np.ndarray
+            Normalized velocity array of shape (N,).
+        """
+
+        if not isinstance(v, np.ndarray):
+            v = np.asarray(v)
+
+        if method == "zscore":
+            mu, sigma = v.mean(), v.std()
+            v_norm = (v - mu) / (sigma + 1e-6)
+
+        elif method == "robust":
+            median = np.median(v)
+            q1, q3 = np.percentile(v, [25, 75])
+            iqr = q3 - q1
+            v_norm = (v - median) / (iqr + 1e-6)
+
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
+        return v_norm
 
     # ------------------------------------------------------------------------------------------------------------------

@@ -1,52 +1,46 @@
-name: v2x2_npj_early
-root_dir: "dataset/v2xsim2_info/v2xsim_infos_train.pkl"  # not dir, but file
-validate_dir: "dataset/v2xsim2_info/v2xsim_infos_val.pkl"
-test_dir: "dataset/v2xsim2_info/v2xsim_infos_test.pkl"
+name: pointpillar_single_baseline
 
-noise_setting:
-  add_noise: false
+root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
+validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
+test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
 
-comm_range: 50
-
+ref_frame: 'ego_pose' # or 'ego_pose'
 
 yaml_parser: "load_point_pillar_params"
 train_params:
   batch_size: &batch_size 4
-  epoches: 30
-  eval_freq: 2
-  save_freq: 2
-  max_cav: &max_cav 5
+  epoches: 100
+  eval_freq: 1
+  save_freq: 1
 
-input_source: ['lidar']
-label_type: 'lidar'
+input_source: ['lidar'] # TODO: It is using both no problem now
+label_type: 'lidar' # TODO: It is using both no problem now
+
+only_vis_ego: true
 
 fusion:
-  core_method: 'intermediate'
+  core_method: 'SingleDatasetBaseline'
   dataset: 'v2xsim'
-  args: 
-    proj_first: false
+  args: []
 
 # preprocess-related
 preprocess:
-  # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
   core_method: 'SpVoxelPreprocessor'
   args:
-    voxel_size: &voxel_size [0.4, 0.4, 5]
+    voxel_size: &voxel_size [0.4, 0.4, 8]
+
     max_points_per_voxel: 32
     max_voxel_train: 32000
     max_voxel_test: 70000
-  # lidar range for each individual cav. Format: xyzxyz minmax
-  cav_lidar_range: &cav_lidar [-32, -32, -3, 32, 32, 2]
+    lidar_num_point_features: 4 # for xyz and intensity
 
-data_augment:
-  - NAME: random_world_flip
-    ALONG_AXIS_LIST: [ 'x' ]
+    radar_max_points_per_voxel: 8
+    radar_max_voxel_train: 12000
+    radar_max_voxel_test: 20000
+    radar_num_point_features: 4 # x,y,z, v_rel_norm, v_r_norm, v_r_x_norm, v_ry_norm
+  cav_lidar_range: &cav_lidar [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
 
-  - NAME: random_world_rotation
-    WORLD_ROT_ANGLE: [ -0.78539816, 0.78539816 ]
-
-  - NAME: random_world_scaling
-    WORLD_SCALE_RANGE: [ 0.95, 1.05 ]
+data_augment: []
 
 # anchor box related
 postprocess:
@@ -54,36 +48,37 @@ postprocess:
   gt_range: *cav_lidar
   anchor_args:
     cav_lidar_range: *cav_lidar
-    l: 4.5
-    w: 2
+    l: 3.9
+    w: 1.6
     h: 1.56
-    r: [0, 90]
+    r: &anchor_yaw [0, 90]
     feature_stride: 2
     num: &anchor_num 2
   target_args:
     pos_threshold: 0.6
     neg_threshold: 0.45
-    score_threshold: 0.4
+    score_threshold: 0.20
   order: 'hwl' # hwl or lwh
   max_num: 100 # maximum number of objects in a single frame. use this number to make sure different frames has the same dimension in the same batch
   nms_thresh: 0.15
+  dir_args: &dir_args
+    dir_offset: 0.7853
+    num_bins: 2
+    anchor_yaw: *anchor_yaw
 
 # model related
 model:
-  core_method: point_pillar
+  core_method: point_pillar_single_baseline
   args:
     voxel_size: *voxel_size
     lidar_range: *cav_lidar
     anchor_number: *anchor_num
-    max_cav: *max_cav
-    compression: 0 # compression rate
-    backbone_fix: false
-
+    dir_args: *dir_args
     pillar_vfe:
       use_norm: true
       with_distance: false
       use_absolute_xyz: true
-      num_filters: [64]
+      num_filters: [ 64 ]
     point_pillar_scatter:
       num_features: 64
 
@@ -93,19 +88,32 @@ model:
       num_filters: [64, 128, 256]
       upsample_strides: [1, 2, 4]
       num_upsample_filter: [128, 128, 128]
+
     shrink_header:
       kernal_size: [ 3 ]
       stride: [ 1 ]
       padding: [ 1 ]
       dim: [ 256 ]
       input_dim: 384 # 128 * 3
-    anchor_num: *anchor_num
 
 loss:
   core_method: point_pillar_loss
   args:
-    cls_weight: 1.0
-    reg: 2.0
+    pos_cls_weight: 1.0
+    cls:
+      type: 'SigmoidFocalLoss'
+      alpha: 0.25
+      gamma: 2.0
+      weight: 1.0
+    reg:
+      type: 'WeightedSmoothL1Loss'
+      sigma: 3.0
+      codewise: true
+      weight: 2.0
+    dir:
+      type: 'WeightedSoftmaxClassificationLoss'
+      weight: 0.2
+      args: *dir_args
 
 optimizer:
   core_method: Adam
@@ -117,4 +125,4 @@ optimizer:
 lr_scheduler:
   core_method: multistep #step, multistep and Exponential support
   gamma: 0.1
-  step_size: [10, 20]
+  step_size: [10, 15]

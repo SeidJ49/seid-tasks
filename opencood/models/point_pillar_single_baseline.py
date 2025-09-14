@@ -1,36 +1,33 @@
-# -*- coding: utf-8 -*-
-# Author: Yifan Lu <yifan_lu@sjtu.edu.cn> Runsheng Xu <rxx3386@ucla.edu>, OpenPCDet
-# License: TDG-Attribution-NonCommercial-NoDistrib
-
-
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-
-from opencood.models.sub_modules.pillar_vfe import PillarVFE
-from opencood.models.sub_modules.point_pillar_scatter import PointPillarScatter
-from opencood.models.sub_modules.base_bev_backbone_resnet import ResNetBEVBackbone
 from opencood.models.sub_modules.base_bev_backbone import BaseBEVBackbone
 from opencood.models.sub_modules.downsample_conv import DownsampleConv
 
 
-class PointPillar(nn.Module):
+from opencood.models.sub_modules.pillar_vfe import PillarVFE
+from opencood.models.sub_modules.point_pillar_scatter import PointPillarScatter
+
+
+class PointPillarSingleBaseline(nn.Module):
     def __init__(self, args):
-        super(PointPillar, self).__init__()
+        super(PointPillarSingleBaseline, self).__init__()
 
-        # PILLAR VFE
+        # --- LiDAR ----------------------------------------------------------------------------------------------------
         self.lidar_pillar_vfe = PillarVFE(args['pillar_vfe'], num_point_features=4, voxel_size=args['voxel_size'], point_cloud_range=args['lidar_range'])
-        self.scatter = PointPillarScatter(args['point_pillar_scatter'])
+        self.lidar_scatter = PointPillarScatter(args['point_pillar_scatter'])
+        # --------------------------------------------------------------------------------------------------------------
 
+        # --- RADAR ----------------------------------------------------------------------------------------------------
         self.radar_pillar_vfe = PillarVFE(args['pillar_vfe'], num_point_features=4, voxel_size=args['voxel_size'], point_cloud_range=args['lidar_range'])
+        self.radar_scatter = PointPillarScatter(args['point_pillar_scatter'])
+        # --------------------------------------------------------------------------------------------------------------
 
-        is_resnet = args['base_bev_backbone'].get("resnet", False)
-        if is_resnet:
-            self.backbone = ResNetBEVBackbone(args['base_bev_backbone'], 128) # or you can use ResNetBEVBackbone, which is stronger
-        else:
-            self.backbone = BaseBEVBackbone(args['base_bev_backbone'], 128) # or you can use ResNetBEVBackbone, which is stronger
-
+        # --- BEV Backbone ---------------------------------------------------------------------------------------------
+        self.backbone = BaseBEVBackbone(args['base_bev_backbone'], 128)
         self.out_channel = sum(args['base_bev_backbone']['num_upsample_filter'])
+        # --------------------------------------------------------------------------------------------------------------
 
         self.shrink_flag = False
         if 'shrink_header' in args:
@@ -38,15 +35,12 @@ class PointPillar(nn.Module):
             self.shrink_conv = DownsampleConv(args['shrink_header'])
             self.out_channel = args['shrink_header']['dim'][-1]
 
-        self.cls_head = nn.Conv2d(self.out_channel, args['anchor_number'], # 384
-                                  kernel_size=1)
-        self.reg_head = nn.Conv2d(self.out_channel, 7 * args['anchor_number'], # 384
-                                  kernel_size=1)
-        
+        self.cls_head = nn.Conv2d(self.out_channel, args['anchor_number'], kernel_size=1) # 384
+        self.reg_head = nn.Conv2d(self.out_channel, 7 * args['anchor_number'],kernel_size=1) # 384
+
         if 'dir_args' in args.keys():
             self.use_dir = True
-            self.dir_head = nn.Conv2d(self.out_channel, args['dir_args']['num_bins'] * args['anchor_number'],
-                                  kernel_size=1) # BIN_NUM = 2， # 384
+            self.dir_head = nn.Conv2d(self.out_channel, args['dir_args']['num_bins'] * args['anchor_number'],kernel_size=1) # BIN_NUM = 2， # 384
         else:
             self.use_dir = False
 
@@ -61,6 +55,9 @@ class PointPillar(nn.Module):
                             'voxel_coords': lidar_voxel_coords,
                             'voxel_num_points': lidar_voxel_num_points}
 
+        lidar_batch_dict = self.lidar_pillar_vfe(lidar_batch_dict)
+        lidar_batch_dict = self.lidar_scatter(lidar_batch_dict)
+
         # --------------------------------------------------------------------------------------------------------------
 
         # --- RADAR ----------------------------------------------------------------------------------------------------
@@ -72,17 +69,14 @@ class PointPillar(nn.Module):
                             'voxel_coords': radar_voxel_coords,
                             'voxel_num_points': radar_voxel_num_points}
 
+        radar_batch_dict = self.radar_pillar_vfe(radar_batch_dict)
+        radar_batch_dict = self.radar_scatter(radar_batch_dict)
+
         # --------------------------------------------------------------------------------------------------------------
 
-        lidar_batch_dict = self.lidar_pillar_vfe(lidar_batch_dict)
-        lidar_batch_dict = self.scatter(lidar_batch_dict)
-
-        radar_batch_dict = self.radar_pillar_vfe(radar_batch_dict)
-        radar_batch_dict = self.scatter(radar_batch_dict)
-
-        batch_dict = {
-            'spatial_features': torch.cat([lidar_batch_dict['spatial_features'], radar_batch_dict['spatial_features']], dim=1),
-        }
+        # --- BOTH -----------------------------------------------------------------------------------------------------
+        batch_dict = {'spatial_features': torch.cat([lidar_batch_dict['spatial_features'], radar_batch_dict['spatial_features']], dim=1),}
+        # --------------------------------------------------------------------------------------------------------------
 
         batch_dict = self.backbone(batch_dict)
 
