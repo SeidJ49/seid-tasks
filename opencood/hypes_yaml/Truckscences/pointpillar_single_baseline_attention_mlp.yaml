@@ -9,7 +9,7 @@ ref_frame: 'ego_pose' # or 'ego_pose'
 yaml_parser: "load_point_pillar_params"
 train_params:
   batch_size: &batch_size 4
-  epoches: 100
+  epoches: 80
   eval_freq: 1
   save_freq: 1
 
