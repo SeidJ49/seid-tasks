@@ -1,4 +1,4 @@
-name: pointpillar_single_baseline_attention_mlp_his
+name: pointpillar_single_baseline_attention_mlp_his_filter_split_dialation
 
 root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
 validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
@@ -68,7 +68,7 @@ postprocess:
 
 # model related
 model:
-  core_method: point_pillar_single_baseline_attention_mlp_his
+  core_method: point_pillar_single_baseline_attention_mlp_his_filter_split_dialation
   args:
     voxel_size: *voxel_size
     lidar_range: *cav_lidar
