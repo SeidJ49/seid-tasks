@@ -1,39 +1,44 @@
-name: pointpillar_single
+name: pointpillar_single_baseline_attention_mlp_his
+
 root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
 validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
 test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
 
+ref_frame: 'ego_pose' # or 'ego_pose'
+
 yaml_parser: "load_point_pillar_params"
 train_params:
-  batch_size: &batch_size 8
-  epoches: 50
+  batch_size: &batch_size 4
+  epoches: 100
   eval_freq: 1
   save_freq: 1
 
-input_source: ['lidar']
-label_type: 'lidar'
+input_source: ['lidar'] # TODO: It is using both no problem now
+label_type: 'lidar' # TODO: It is using both no problem now
 
-comm_range: 50
 only_vis_ego: true
 
 fusion:
-  core_method: 'SingleVehicleDatasetRadar'
+  core_method: 'SingleDatasetBaselineAttentionMlpHis'
   dataset: 'v2xsim'
   args: []
 
 # preprocess-related
 preprocess:
-  # options: BasePreprocessor, VoxelPreprocessor, BevPreprocessor
   core_method: 'SpVoxelPreprocessor'
   args:
-    voxel_size: &voxel_size [0.4, 0.4, 5]
+    voxel_size: &voxel_size [0.4, 0.4, 8]
+
     max_points_per_voxel: 32
     max_voxel_train: 32000
     max_voxel_test: 70000
     lidar_num_point_features: 4 # for xyz and intensity
-    radar_num_point_features: 4 # for xyz and v_rel or 7 for xyz, v_rel_x, v_rel_y,, v_rel_z,  rcs
-  # lidar range for each individual cav. Format: xyzxyz minmax
-  cav_lidar_range: &cav_lidar [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0] # [-32, -32, -3, 32, 32, 2] # [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
+
+    radar_max_points_per_voxel: 8
+    radar_max_voxel_train: 12000
+    radar_max_voxel_test: 20000
+    radar_num_point_features: 7 # x,y,z, v_rel_norm, v_r_norm, v_r_x_norm, v_ry_norm
+  cav_lidar_range: &cav_lidar [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
 
 data_augment: []
 
@@ -63,7 +68,7 @@ postprocess:
 
 # model related
 model:
-  core_method: point_pillar
+  core_method: point_pillar_single_baseline_attention_mlp_his
   args:
     voxel_size: *voxel_size
     lidar_range: *cav_lidar
@@ -73,7 +78,17 @@ model:
       use_norm: true
       with_distance: false
       use_absolute_xyz: true
-      num_filters: [64]
+      num_filters: [ 64 ]
+      # ------------------------------------------------ VERSION X -----------------------------------------------------
+      use_velocity_branch: True
+      velocity_mask:
+        channel: v_r      # or v_rel / v_rx / v_ry
+        abs: true
+        thresh: 0.15
+        reduce: max
+        mode: soft        # 'hard' for binary
+        temp: 12.0
+      # ------------------------------------------------ VERSION X -----------------------------------------------------
     point_pillar_scatter:
       num_features: 64
 
