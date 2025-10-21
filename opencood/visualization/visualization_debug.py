@@ -6,7 +6,6 @@ from matplotlib import pyplot as plt
 folder_counters = {}
 
 def save_heatmaps(spatial_features_2d, folder='heatmaps', prefix='frame'):
-    return
     global folder_counters
     os.makedirs(folder, exist_ok=True)
     features_2d = spatial_features_2d.detach().cpu().numpy()
