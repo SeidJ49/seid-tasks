@@ -26,6 +26,72 @@ def backup_script(full_path, folders_to_save=["models", "data_utils", "utils", "
         source_folder = os.path.join(current_path, f'../{folder_name}')
         shutil.copytree(source_folder, ttarget_folder)
 
+
+def load_saved_model_epoch(saved_path, model, epoch=None):
+    assert os.path.exists(saved_path), '{} not found'.format(saved_path)
+
+    def findLastCheckpoint(save_dir):
+        file_list = glob.glob(os.path.join(save_dir, '*epoch*.pth'))
+        if file_list:
+            epochs_exist = []
+            for file_ in file_list:
+                result = re.findall(".*epoch(.*).pth.*", file_)
+                epochs_exist.append(int(result[0]))
+            initial_epoch_ = max(epochs_exist)
+        else:
+            initial_epoch_ = 0
+        return initial_epoch_
+
+    # if os.path.exists(os.path.join(saved_path, 'net_latest.pth')):
+    #     model.load_state_dict(torch.load(os.path.join(saved_path, 'net_latest.pth')))
+    # file_list = glob.glob(os.path.join(saved_path, 'net_epoch_bestval_at*.pth'))
+
+    if False:
+        pass
+    # if file_list:
+    #    assert len(file_list) == 1
+    #    model.load_state_dict(torch.load(file_list[0], map_location='cpu'), strict=False)
+    #    return eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at")), model
+
+    # if os.path.exists(os.path.join(saved_path, 'net_epoch_bestval*.pth')):
+    #    model.load_state_dict(torch.load(os.path.join(saved_path, 'net_epoch_bestval*.pth')))
+    #    return 100, model
+    else:
+        if epoch is None:
+            initial_epoch = findLastCheckpoint(saved_path)
+        else:
+            initial_epoch = int(epoch)
+
+        if initial_epoch > 0:
+            print('resuming by loading epoch %d' % initial_epoch)
+
+        state_dict_ = torch.load(os.path.join(saved_path, 'net_epoch%d.pth' % initial_epoch))
+        state_dict = {}
+        # convert data_parallal to model
+        for k in state_dict_:
+            if k.startswith('module') and not k.startswith('module_list'):
+                state_dict[k[7:]] = state_dict_[k]
+            else:
+                state_dict[k] = state_dict_[k]
+
+        model_state_dict = model.state_dict()
+
+        for k in state_dict:
+            if k in model_state_dict:
+                if state_dict[k].shape != model_state_dict[k].shape:
+                    print('Skip loading parameter {}, required shape{}, ' \
+                          'loaded shape{}.'.format(
+                        k, model_state_dict[k].shape, state_dict[k].shape))
+                    state_dict[k] = model_state_dict[k]
+            else:
+                print('Drop parameter {}.'.format(k))
+        for k in model_state_dict:
+            if not (k in state_dict):
+                print('No param {}.'.format(k))
+                state_dict[k] = model_state_dict[k]
+        model.load_state_dict(state_dict, strict=False)
+        return initial_epoch, model
+
 def load_saved_model(saved_path, model):
     """
     Load saved model if exiseted
