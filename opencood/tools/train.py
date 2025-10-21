@@ -172,7 +172,7 @@ def main():
 
     print('Training Finished, checkpoints saved to %s' % saved_path)
 
-    run_test = True    
+    run_test = False
     # ddp training may leave multiple bestval
     bestval_model_list = glob.glob(os.path.join(saved_path, "net_epoch_bestval_at*"))
     
