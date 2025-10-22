@@ -1,15 +1,15 @@
 name: pointpillar_single_lidar_radar_baseline_attention_mlp_his
 
-root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences/man-truckscenes_sensordata_v1.0-mini/train.pkl"
-validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences/man-truckscenes_sensordata_v1.0-mini/val.pkl"
-test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences/man-truckscenes_sensordata_v1.0-mini/test.pkl"
+root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
+validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
+test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
 
 ref_frame: 'ego_pose' # or 'ego_pose'
 
 yaml_parser: "load_point_pillar_params"
 train_params:
-  batch_size: &batch_size 1
-  epoches: 1
+  batch_size: &batch_size 4
+  epoches: 30
   eval_freq: 1
   save_freq: 1
 
