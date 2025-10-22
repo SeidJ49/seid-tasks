@@ -20,9 +20,7 @@ class SingleDatasetLidarRadarBaselineAttentionMlp(Dataset):
         self.visualize = visualize
         self.train = train
 
-        #self.save_id = 0
-
-        self.ref_frame = params.get('ref_frame', 'ego_pose') # 'lidar_top_front_pose' or 'ego_pose'
+        self.ref_frame = params.get('ref_frame', 'ego_pose')
 
         # Build preprocessors
         # --- LIDAR ----------------------------------------------------------------------------------------------------
@@ -92,7 +90,6 @@ class SingleDatasetLidarRadarBaselineAttentionMlp(Dataset):
                 cav_entry['params']['object_ids'] = sample['labels']['gt_object_ids'].tolist()
                 cav_entry['params']['ego_pose'] = sample['agents']['1']['ego_pose']['transform']
                 cav_entry['params']['lidar_top_front_pose'] = sample['agents']['1']['lidar_top_front_pose']['transform']
-                # cav_entry['params']['ego_speed'] = sample['agents']['1']['ego_motion_chassis']
                 cav_entry['params']['ego_speed'] = sample['agents']['1']['ego_motion_cabin']
 
                 total += 1
@@ -282,11 +279,6 @@ class SingleDatasetLidarRadarBaselineAttentionMlp(Dataset):
             radar_np = mask_points_by_range(radar_np, self.params['preprocess']['cav_lidar_range'])
             radar_np = mask_ego_points(radar_np) # FIXME: check it
 
-            ## Speicherpfad zusammensetzen
-            #save_path = f"/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/opencood/bilder/{self.save_id}.png"
-            #self.save_radar_bev_png(radar_np, save_path)
-            #self.save_id += 1  # ID hochzählen
-
             radar_dict = self.radar_pre_processor.preprocess(radar_np)
             selected_cav_processed.update({'processed_radar': radar_dict})
 
@@ -469,7 +461,6 @@ class SingleDatasetLidarRadarBaselineAttentionMlp(Dataset):
             radar_data["vrel_x"],
             radar_data["vrel_y"],
             radar_data["vrel_z"],
-            # radar_data["rcs"]
         ], dtype=np.float64).T
         return points
 
@@ -482,9 +473,6 @@ class SingleDatasetLidarRadarBaselineAttentionMlp(Dataset):
 
         r = np.linalg.norm(radar_np[:, :3], axis=1)
         r_safe = np.where(r == 0, 1e-6, r)
-        # ux = radar_np[:, 0] / r_safe
-        # uy = radar_np[:, 1] / r_safe
-        # uz = radar_np[:, 2] / r_safe
         unit_vec = radar_np[:, :3] / r_safe[:, None]
 
         v_rel_vec = radar_np[:, 3:6]
@@ -506,9 +494,6 @@ class SingleDatasetLidarRadarBaselineAttentionMlp(Dataset):
         v_r_y_norm = self.normalize_velocity(v_r_y)
 
         result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel_norm, v_r_norm, v_r_x_norm, v_r_y_norm))
-        # result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_r_norm))
-        # result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_r_norm))
-        #result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel))
         return result_np
 
     @staticmethod
