@@ -20,9 +20,7 @@ class SingleDatasetLidarRadarBaseline(Dataset):
         self.visualize = visualize
         self.train = train
 
-        #self.save_id = 0
-
-        self.ref_frame = params.get('ref_frame', 'ego_pose') # 'lidar_top_front_pose' or 'ego_pose'
+        self.ref_frame = params.get('ref_frame', 'ego_pose')
 
         # Build preprocessors
         # --- LIDAR ----------------------------------------------------------------------------------------------------
@@ -92,7 +90,6 @@ class SingleDatasetLidarRadarBaseline(Dataset):
                 cav_entry['params']['object_ids'] = sample['labels']['gt_object_ids'].tolist()
                 cav_entry['params']['ego_pose'] = sample['agents']['1']['ego_pose']['transform']
                 cav_entry['params']['lidar_top_front_pose'] = sample['agents']['1']['lidar_top_front_pose']['transform']
-                # cav_entry['params']['ego_speed'] = sample['agents']['1']['ego_motion_chassis']
                 cav_entry['params']['ego_speed'] = sample['agents']['1']['ego_motion_cabin']
 
                 total += 1
@@ -282,15 +279,8 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             radar_np = mask_points_by_range(radar_np, self.params['preprocess']['cav_lidar_range'])
             radar_np = mask_ego_points(radar_np) # FIXME: check it
 
-            ## Speicherpfad zusammensetzen
-            #save_path = f"/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/opencood/bilder/{self.save_id}.png"
-            #self.save_radar_bev_png(radar_np, save_path)
-            #self.save_id += 1  # ID hochzählen
-
             radar_dict = self.radar_pre_processor.preprocess(radar_np)
             selected_cav_processed.update({'processed_radar': radar_dict})
-
-
 
         if self.visualize:
             selected_cav_processed.update({'origin_lidar': lidar_np})
@@ -469,84 +459,19 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             radar_data["vrel_x"],
             radar_data["vrel_y"],
             radar_data["vrel_z"],
-            # radar_data["rcs"]
         ], dtype=np.float64).T
         return points
 
 
     def process_all_radar_velocity(self, radar_np, radar_transform, lidar_velocity_xyz, lidar_transform):
-        l2r_transform = x1_to_x2(lidar_transform, radar_transform)
-        l2r_rotation_matrix = l2r_transform[:3, :3]
-        radar_velocity_xyz = np.dot(l2r_rotation_matrix, lidar_velocity_xyz)
         radar_np = radar_np.copy()
 
         r = np.linalg.norm(radar_np[:, :3], axis=1)
         r_safe = np.where(r == 0, 1e-6, r)
-        # ux = radar_np[:, 0] / r_safe
-        # uy = radar_np[:, 1] / r_safe
-        # uz = radar_np[:, 2] / r_safe
         unit_vec = radar_np[:, :3] / r_safe[:, None]
 
         v_rel_vec = radar_np[:, 3:6]
         v_rel = np.matmul(v_rel_vec, unit_vec.T).diagonal()
 
-        # Compute radial speed from ego motion and sum with relative velocity
-        v_ego_radial = unit_vec @ radar_velocity_xyz
-        v_r = v_rel + v_ego_radial
-
-        # Decompose radial speed into x and y components
-        beta = np.arctan2(radar_np[:, 1], radar_np[:, 0])
-        v_r_x = np.cos(beta) * v_r
-        v_r_y = np.sin(beta) * v_r
-
-        # Normalize the computed velocities (clip to [-12.5, 12.5] and scale to [-1, 1])
-        v_rel_norm = self.normalize_velocity(v_rel)
-        v_r_norm = self.normalize_velocity(v_r)
-        v_r_x_norm = self.normalize_velocity(v_r_x)
-        v_r_y_norm = self.normalize_velocity(v_r_y)
-
-        #result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel_norm, v_r_norm, v_r_x_norm, v_r_y_norm))
-        # result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_r_norm))
-        # result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_r_norm))
         result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel))
         return result_np
-
-    @staticmethod
-    def normalize_velocity(v: np.ndarray, method: str = "zscore") -> np.ndarray:
-        """
-        Normalize 1D velocity array.
-
-        Parameters
-        ----------
-        v : np.ndarray
-            Input velocity array of shape (N,).
-        method : str, optional
-            Normalization method, one of:
-            - "zscore"  : (v - mean) / std
-            - "robust"  : (v - median) / IQR (interquartile range)
-
-        Returns
-        -------
-        v_norm : np.ndarray
-            Normalized velocity array of shape (N,).
-        """
-
-        if not isinstance(v, np.ndarray):
-            v = np.asarray(v)
-
-        if method == "zscore":
-            mu, sigma = v.mean(), v.std()
-            v_norm = (v - mu) / (sigma + 1e-6)
-
-        elif method == "robust":
-            median = np.median(v)
-            q1, q3 = np.percentile(v, [25, 75])
-            iqr = q3 - q1
-            v_norm = (v - median) / (iqr + 1e-6)
-
-        else:
-            raise ValueError(f"Unknown method: {method}")
-
-        return v_norm
-
-    # ------------------------------------------------------------------------------------------------------------------

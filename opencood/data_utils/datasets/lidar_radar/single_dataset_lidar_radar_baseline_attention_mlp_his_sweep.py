@@ -5,7 +5,6 @@ from typing import Dict
 from abc import abstractmethod
 import numpy as np
 from matplotlib import pyplot as plt
-from networkx.algorithms.shortest_paths.unweighted import single_source_shortest_path
 from pypcd import pypcd
 import torch
 from torch.utils.data import Dataset
@@ -24,9 +23,7 @@ class SingleDatasetLidarRadarBaselineAttentionMlpHisSweep(Dataset):
         self.visualize = visualize
         self.train = train
 
-        #self.save_id = 0
-
-        self.ref_frame = params.get('ref_frame', 'ego_pose') # 'lidar_top_front_pose' or 'ego_pose'
+        self.ref_frame = params.get('ref_frame', 'ego_pose')
 
         # Build preprocessors
         # --- LIDAR ----------------------------------------------------------------------------------------------------
@@ -232,7 +229,7 @@ class SingleDatasetLidarRadarBaselineAttentionMlpHisSweep(Dataset):
 
             # --- SWEEP HIS --------------------------------------------------------------------------------------------
             all_his_pts = []
-            for his_cav_content in s['sweeps']:  # es sind immer genau zwei
+            for his_cav_content in s['sweeps']:
                 his_sensor_path = self.find_sensor_path(his_cav_content['sensor_path'])
                 his_radar_np = self.pcd_to_npy_array(his_sensor_path)
                 his_radar_transform = np.asarray(his_cav_content['sensor_pose'])
@@ -241,7 +238,7 @@ class SingleDatasetLidarRadarBaselineAttentionMlpHisSweep(Dataset):
                     his_cav_content['ego_motion_cabin']['vy'],
                     his_cav_content['ego_motion_cabin']['vz']
                 ])
-                his_ref_vehicle_pose = np.array(his_cav_content['ego_pose']['transform'])  # ego_pose als Referenz
+                his_ref_vehicle_pose = np.array(his_cav_content['ego_pose']['transform'])
 
                 t_ref = cav_content['params']['timestamp']
                 t_his = his_cav_content['timestamp']
@@ -330,15 +327,8 @@ class SingleDatasetLidarRadarBaselineAttentionMlpHisSweep(Dataset):
             radar_np = mask_points_by_range(radar_np, self.params['preprocess']['cav_lidar_range'])
             radar_np = mask_ego_points(radar_np) # FIXME: check it
 
-            ## Speicherpfad zusammensetzen
-            #save_path = f"/home/ws-ids-es3-01/PycharmProjects/hamdard_bm2cp/opencood/bilder/{self.save_id}.png"
-            #self.save_radar_bev_png(radar_np, save_path)
-            #self.save_id += 1  # ID hochzählen
-
             radar_dict = self.radar_pre_processor.preprocess(radar_np)
             selected_cav_processed.update({'processed_radar': radar_dict})
-
-
 
         if self.visualize:
             selected_cav_processed.update({'origin_lidar': lidar_np})
@@ -525,7 +515,6 @@ class SingleDatasetLidarRadarBaselineAttentionMlpHisSweep(Dataset):
             radar_data["vrel_x"],
             radar_data["vrel_y"],
             radar_data["vrel_z"],
-            # radar_data["rcs"]
         ], dtype=np.float64).T
         return points
 
@@ -590,7 +579,7 @@ class SingleDatasetLidarRadarBaselineAttentionMlpHisSweep(Dataset):
         v_r_y_norm = self.normalize_velocity(v_r_y)
 
         # doppler compensation for dynamic points
-        d_t = (t_ref - t_his) / 1e6 #TODO: Changed this because now we are using sweeps
+        d_t = (t_ref - t_his) / 1e6  #TODO: Changed this because now we are using sweeps
         dynamic_mask = np.abs(v_r_norm) > self.v_threshold
 
         if np.any(dynamic_mask):
@@ -641,44 +630,5 @@ class SingleDatasetLidarRadarBaselineAttentionMlpHisSweep(Dataset):
             raise ValueError(f"Unknown method: {method}")
 
         return v_norm
-
-    # ------------------------------------------------------------------------------------------------------------------
-
-    # --- DEBUG/ VISUALIZATIONS ----------------------------------------------------------------------------------------
-
-    @staticmethod
-    def visualize_radar_bev(radar_np):
-        x = radar_np[:, 0]
-        y = radar_np[:, 1]
-        color = radar_np[:, 3]  # 4th column for color
-
-        plt.figure(figsize=(8, 8))
-        sc = plt.scatter(x, y, c=color, cmap='jet', s=1)
-        plt.colorbar(sc, label='Relative Velocity')
-        plt.xlabel('X (meters)')
-        plt.ylabel('Y (meters)')
-        plt.title('Radar Point Cloud BEV (Color: Relative Velocity)')
-        plt.axis('equal')
-        plt.show()
-
-    @staticmethod
-    def save_radar_bev_png(radar_np, save_path):
-        x = radar_np[:, 0]
-        y = radar_np[:, 1]
-        color = radar_np[:, 4]
-
-        mask_red = (color > 0.8) | (color < -0.8)
-        mask_gray = ~mask_red
-
-        plt.figure(figsize=(8, 8))
-        plt.scatter(x[mask_gray], y[mask_gray], color='gray', s=1)
-        plt.scatter(x[mask_red], y[mask_red], color='red', s=1)
-
-        plt.xlabel('X (meters)')
-        plt.ylabel('Y (meters)')
-        plt.title('Radar Point Cloud BEV (Red: |Rel. Vel| > 0.5, Gray: else)')
-        plt.axis('equal')
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close()
 
     # ------------------------------------------------------------------------------------------------------------------

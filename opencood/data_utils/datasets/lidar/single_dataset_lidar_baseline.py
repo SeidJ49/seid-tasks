@@ -20,9 +20,7 @@ class SingleDatasetLidarBaseline(Dataset):
         self.visualize = visualize
         self.train = train
 
-        #self.save_id = 0
-
-        self.ref_frame = params.get('ref_frame', 'ego_pose') # 'lidar_top_front_pose' or 'ego_pose'
+        self.ref_frame = params.get('ref_frame', 'ego_pose')
 
         # Build preprocessors
         # --- LIDAR ----------------------------------------------------------------------------------------------------
@@ -79,7 +77,6 @@ class SingleDatasetLidarBaseline(Dataset):
                 cav_entry['params']['object_ids'] = sample['labels']['gt_object_ids'].tolist()
                 cav_entry['params']['ego_pose'] = sample['agents']['1']['ego_pose']['transform']
                 cav_entry['params']['lidar_top_front_pose'] = sample['agents']['1']['lidar_top_front_pose']['transform']
-                # cav_entry['params']['ego_speed'] = sample['agents']['1']['ego_motion_chassis']
                 cav_entry['params']['ego_speed'] = sample['agents']['1']['ego_motion_cabin']
 
                 total += 1
