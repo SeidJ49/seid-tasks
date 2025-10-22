@@ -10,6 +10,8 @@ from opencood.models.sub_modules.point_pillar_scatter import PointPillarScatter
 
 from opencood.models.sub_modules.pillar_vfe_baseline_attention_mlp_his import PillarVFEBaselineAttentionMlpHis
 from opencood.models.sub_modules.point_pillar_scatter_baseline_attention_mlp_his import PointPillarScatterBaselineAttentionMlpHis
+
+# DEBUG
 from opencood.visualization.visualization_debug import save_heatmaps
 
 
@@ -132,37 +134,15 @@ class PointPillarSingleLidarRadarBaselineAttentionMlpHis(nn.Module):
         # -------------------------------------------- VERSION X -------------------------------------------------------
         original_dynamic_mask = radar_batch_dict['velocity_confidence_mask']
 
-        # Nur Werte behalten, die exakt 1 sind
-        filtered_mask = (original_dynamic_mask == 1).float()
-
-        k = 3
-        pad = k // 2
-        min_neighbors = 5
-
-        B, C, H, W = filtered_mask.shape
-        weight = torch.ones(C, 1, k, k, device=filtered_mask.device)
-
-        neighbor_count = F.conv2d((filtered_mask > 0).float(), weight, padding=pad, groups=C)
-        valid_mask = (neighbor_count >= min_neighbors).float()
-        clean_mask = filtered_mask * valid_mask
-
-
-        save_heatmaps(original_dynamic_mask, folder='original_dynamic_mask', prefix='frame')
-        save_heatmaps(clean_mask, folder='clean_mask', prefix='frame')
-
-
         kernel_size = 7
         padding = kernel_size // 2
-        dilated = F.max_pool2d(clean_mask, kernel_size, stride=1, padding=padding)
 
-        save_heatmaps(dilated, folder='dilated', prefix='frame')
-
+        dilated = F.max_pool2d(original_dynamic_mask, kernel_size, stride=1, padding=padding)
 
         sf = batch_dict['spatial_features']
         batch_dict['spatial_features'] = sf * (1.0 + self.gamma_pre * dilated)
 
         dyn_mask = F.interpolate(dilated.float(), size=spatial_features_2d.shape[-2:], mode='bilinear', align_corners=False).clamp_(0.0, 1.0)
-
 
         assert dyn_mask.shape[0] == spatial_features_2d.shape[0], f"Batch size mismatch: dyn_mask {dyn_mask.shape[0]} vs spatial_features_2d {spatial_features_2d.shape[0]}"
 
