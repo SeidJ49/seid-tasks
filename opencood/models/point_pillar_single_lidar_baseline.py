@@ -1,6 +1,5 @@
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
 
 from opencood.models.sub_modules.base_bev_backbone import BaseBEVBackbone
 from opencood.models.sub_modules.downsample_conv import DownsampleConv
@@ -8,6 +7,7 @@ from opencood.models.sub_modules.downsample_conv import DownsampleConv
 
 from opencood.models.sub_modules.pillar_vfe import PillarVFE
 from opencood.models.sub_modules.point_pillar_scatter import PointPillarScatter
+from opencood.visualization.visualization_debug import save_heatmaps
 
 
 class PointPillarSingleLidarBaseline(nn.Module):
@@ -59,15 +59,22 @@ class PointPillarSingleLidarBaseline(nn.Module):
         batch_dict = {'spatial_features': lidar_batch_dict['spatial_features']}
         # --------------------------------------------------------------------------------------------------------------
 
+        save_heatmaps(batch_dict['spatial_features'], 'spatial_features', 'frame')
+
         batch_dict = self.backbone(batch_dict)
 
         spatial_features_2d = batch_dict['spatial_features_2d']
+
+        save_heatmaps(spatial_features_2d, 'spatial_features_2d', 'frame')
 
         if self.shrink_flag:
             spatial_features_2d = self.shrink_conv(spatial_features_2d)
 
         psm = self.cls_head(spatial_features_2d)
         rm = self.reg_head(spatial_features_2d)
+
+        save_heatmaps(psm, 'psm', 'frame')
+        save_heatmaps(rm, 'rm', 'frame')
 
         output_dict = {'cls_preds': psm,
                        'reg_preds': rm}
