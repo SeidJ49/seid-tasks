@@ -10,6 +10,8 @@ from opencood.models.sub_modules.point_pillar_scatter import PointPillarScatter
 
 from opencood.models.sub_modules.pillar_vfe_baseline_attention import PillarVFEBaselineAttention
 from opencood.models.sub_modules.point_pillar_scatter_baseline_attention import PointPillarScatterBaselineAttention
+from opencood.visualization.visualization_debug import save_heatmaps
+
 
 # ------------------------------------------------------------VERSION X ------------------------------------------------
 
@@ -118,6 +120,9 @@ class PointPillarSingleLidarRadarBaselineAttention(nn.Module):
 
         # --------------------------------------------------------------------------------------------------------------
 
+        save_heatmaps(radar_batch_dict['spatial_features'], 'radar_spatial_features', 'frame')
+        save_heatmaps(lidar_batch_dict['spatial_features'], 'lidar_spatial_features', 'frame')
+
         # --- BOTH -----------------------------------------------------------------------------------------------------
         batch_dict = {'spatial_features': torch.cat([lidar_batch_dict['spatial_features'], radar_batch_dict['spatial_features']], dim=1),}
         # --------------------------------------------------------------------------------------------------------------
@@ -125,26 +130,43 @@ class PointPillarSingleLidarRadarBaselineAttention(nn.Module):
         batch_dict = self.backbone(batch_dict)
         spatial_features_2d = batch_dict['spatial_features_2d']
 
+        save_heatmaps(spatial_features_2d, 'spatial_features_2d', 'frame')
+
         spatial_features_2d = self.chan_gate(spatial_features_2d)
+
+        save_heatmaps(spatial_features_2d, 'spatial_features_2d_after_chan_gate', 'frame')
 
         # -------------------------------------------- VERSION X -------------------------------------------------------
         original_dynamic_mask = radar_batch_dict['velocity_confidence_mask']
+
+        save_heatmaps(original_dynamic_mask, 'original_dynamic_mask', 'frame')
 
         kernel_size = 7
         padding = kernel_size // 2
 
         dilated = F.max_pool2d(original_dynamic_mask, kernel_size, stride=1, padding=padding)
 
+        save_heatmaps(dilated, 'dilated', 'frame')
+
 
         sf = batch_dict['spatial_features']
+
+        save_heatmaps(sf, 'sf', 'frame')
+
         batch_dict['spatial_features'] = sf * (1.0 + self.gamma_pre * dilated)
 
+        save_heatmaps(batch_dict['spatial_features'], 'sf_game_pre_dilated', 'frame')
+
         dyn_mask = F.interpolate(dilated.float(), size=spatial_features_2d.shape[-2:], mode='bilinear', align_corners=False).clamp_(0.0, 1.0)
+
+        save_heatmaps(dyn_mask, 'dyn_mask', 'frame')
 
 
         assert dyn_mask.shape[0] == spatial_features_2d.shape[0], f"Batch size mismatch: dyn_mask {dyn_mask.shape[0]} vs spatial_features_2d {spatial_features_2d.shape[0]}"
 
         spatial_features_2d = self.attn_mod(spatial_features_2d, dyn_mask)
+
+        save_heatmaps(spatial_features_2d, 'spatial_features_2d_after_attn_mod', 'frame')
         # -------------------------------------------- VERSION X -------------------------------------------------------
 
          # optional shrinkage
@@ -153,6 +175,9 @@ class PointPillarSingleLidarRadarBaselineAttention(nn.Module):
 
         psm = self.cls_head(spatial_features_2d)
         rm = self.reg_head(spatial_features_2d)
+
+        save_heatmaps(psm, 'psm', 'frame')
+        save_heatmaps(rm, 'rm', 'frame')
 
         output_dict = {'cls_preds': psm,
                        'reg_preds': rm}
