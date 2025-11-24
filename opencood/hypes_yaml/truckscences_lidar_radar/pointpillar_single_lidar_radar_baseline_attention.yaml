@@ -4,7 +4,7 @@ root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/
 validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
 test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
 
-ref_frame: 'ego_pose' # or 'ego_pose'
+ref_frame: 'ego_pose'
 
 yaml_parser: "load_point_pillar_params"
 train_params:
