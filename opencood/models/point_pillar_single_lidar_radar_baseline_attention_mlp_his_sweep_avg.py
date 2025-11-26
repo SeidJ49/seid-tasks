@@ -48,9 +48,9 @@ class ChannelGate(nn.Module):
 
 # -----------------------------------------------------------VERSION X -------------------------------------------------
 
-class PointPillarSingleLidarRadarBaselineAttentionMlpHis(nn.Module):
+class PointPillarSingleLidarRadarBaselineAttentionMlpHisSweepAvg(nn.Module):
     def __init__(self, args):
-        super(PointPillarSingleLidarRadarBaselineAttentionMlpHis, self).__init__()
+        super(PointPillarSingleLidarRadarBaselineAttentionMlpHisSweepAvg, self).__init__()
 
         # --- LiDAR ----------------------------------------------------------------------------------------------------
         self.lidar_pillar_vfe = PillarVFE(args['pillar_vfe'], num_point_features=4, voxel_size=args['voxel_size'], point_cloud_range=args['lidar_range'])
@@ -131,7 +131,7 @@ class PointPillarSingleLidarRadarBaselineAttentionMlpHis(nn.Module):
         original_dynamic_mask = radar_batch_dict['velocity_confidence_mask']
 
         # nachher (weicher & präziser)
-        kernel_size = 5
+        kernel_size = 7
         padding = kernel_size // 2
         m = original_dynamic_mask.float()
         maxed = F.max_pool2d(m, kernel_size, stride=1, padding=padding)
