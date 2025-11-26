@@ -4,7 +4,6 @@ from collections import OrderedDict
 from typing import Dict
 from abc import abstractmethod
 import numpy as np
-from matplotlib import pyplot as plt
 from pypcd import pypcd
 import torch
 from torch.utils.data import Dataset
@@ -228,8 +227,13 @@ class SingleDatasetLidarRadarBaselineAttentionMlpHisSweep(Dataset):
             pts = self.process_all_radar_velocity(radar_np, radar_transform, ego_speed_xyz, ref_vehicle_pose)
 
             # --- SWEEP HIS --------------------------------------------------------------------------------------------
+            # take only the last 2 sweeps
+            # for his_cav_content in s['sweeps']:
+            # his_sweeps = s['sweeps'][-2:]
+            his_sweeps = [s['sweeps'][-1], s['sweeps'][-3]]
             all_his_pts = []
-            for his_cav_content in s['sweeps']:
+
+            for his_cav_content in his_sweeps:
                 his_sensor_path = self.find_sensor_path(his_cav_content['sensor_path'])
                 his_radar_np = self.pcd_to_npy_array(his_sensor_path)
                 his_radar_transform = np.asarray(his_cav_content['sensor_pose'])
