@@ -227,6 +227,9 @@ class SingleDatasetLidarRadarBaselineAttentionMlpHisSweep(Dataset):
             pts = self.process_all_radar_velocity(radar_np, radar_transform, ego_speed_xyz, ref_vehicle_pose)
 
             # --- SWEEP HIS --------------------------------------------------------------------------------------------
+            # OLD:
+            #all_his_pts = []
+            #for his_cav_content in s['sweeps']:
             # take only the last 2 sweeps
             # for his_cav_content in s['sweeps']:
             # his_sweeps = s['sweeps'][-2:]
