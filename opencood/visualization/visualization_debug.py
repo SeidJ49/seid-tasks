@@ -7,7 +7,6 @@ folder_counters = {}
 
 
 def save_heatmaps(features, folder='heatmaps', prefix='frame', apply_sigmoid=False, take_max=True):
-    return
     global folder_counters
     os.makedirs(folder, exist_ok=True)
 

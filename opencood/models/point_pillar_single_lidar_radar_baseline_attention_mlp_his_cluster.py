@@ -132,9 +132,9 @@ def _dbscan_rect_mask_from_binary(
 
 # -----------------------------------------------------------VERSION X -------------------------------------------------
 
-class PointPillarSingleLidarRadarBaselineAttentionMlpHis(nn.Module):
+class PointPillarSingleLidarRadarBaselineAttentionMlpHisCluster(nn.Module):
     def __init__(self, args):
-        super(PointPillarSingleLidarRadarBaselineAttentionMlpHis, self).__init__()
+        super(PointPillarSingleLidarRadarBaselineAttentionMlpHisCluster, self).__init__()
 
         # --- LiDAR ----------------------------------------------------------------------------------------------------
         self.lidar_pillar_vfe = PillarVFE(args['pillar_vfe'], num_point_features=4, voxel_size=args['voxel_size'],
