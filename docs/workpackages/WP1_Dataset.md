@@ -1,52 +1,173 @@
-# Work Package 1: Dataset Setup & Preparation
+## Work Package 1: Baseline Setup – Detaillierte Beschreibung
 
-## Objective
-Set up various datasets with different test scenarios for Lite-BEV LiDAR-Radar fusion model.
+Ziel: **Stabile, reproduzierbare Baselines ohne jegliche Fusion oder Distillation** aufbauen. Erst wenn diese laufen, wird die eigene Methode implementiert.
 
-## Main Goals
-- Create LiDAR-Radar intermediate fusion dataset for ADVERCity dataset
-- Implement dataset with Doppler-based dynamic mask for motion-aware distillation
-- Provide reliable data loading pipeline compatible with OpenCOOD framework
+---
 
-## Key Tasks
+### 1. Was muss am Ende funktionieren?
 
-### 1.1 LiDAR-Radar Dataset Implementation
-- **File**: `opencood/data_utils/datasets/adver_city/lidar_radar_intermediate_fusion_dataset_v1.py`
-- **Goal**: Create new dataset class that provides:
-  - `processed_lidar`: LiDAR point cloud data
-  - `processed_radar`: Radar point cloud data
-  - `label_dict`: Detection labels
-  - `anchor_box`: Anchor boxes
-  - `record_len`: Record length for temporal alignment
-  - `pairwise_t_matrix`: Transformation matrices between agents
-  - `dyn_mask_bev`: BEV-space dynamic mask for distillation
+Drei unabhängige Detektoren, alle auf **PointPillars**-Basis:
 
-### 1.2 Doppler-based Dynamic Mask (M_dyn)
-- Compute dynamic mask from Radar radial velocity (v_r)
-- Apply hard threshold: |v_r| > 0.5 m/s
-- Project to BEV coordinates
-- Create per-pillar occupancy/max-aggregation
-- Output: `dyn_mask_bev` in shape [B, 1, H, W]
+| Modell | Eingang | Ausgabe |
+|--------|---------|---------|
+| **LiDAR‑only** | Nur LiDAR-Punkte | 3D‑Bounding‑Boxes |
+| **Radar‑only** | Nur Radar-Punkte | 3D‑Bounding‑Boxes |
+| **Naive Fusion** | LiDAR + Radar (kein Gate, keine Reliability) | 3D‑Bounding‑Boxes |
 
-### 1.3 Dataset Registry Extension
-- **File**: `opencood/data_utils/datasets/__init__.py`
-- Add new key: `LiDARRadarIntermediateFusionDatasetADVERCITY_V1`
-- Ensure proper instantiation through dataset factory
+Alle drei müssen auf **demselben Dataset** (z.B. nuScenes, View-of-Delft, oder eurem internen Datensatz) trainierbar sein, mit klaren Metriken (mAP, NDS, etc.).
 
-### 1.4 Validation & Testing
-- Verify dataset produces consistent tensor shapes
-- Check that ego-contract keys are present
-- Validate dyn_mask_bev is neither empty nor all-ones
-- Test with training pipeline
+---
 
-## Deliverables
-- [ ] `lidar_radar_intermediate_fusion_dataset_v1.py` with full implementation
-- [ ] Updated dataset registry
-- [ ] Test script validating dataset output structure
-- [ ] Documentation of ego-contract requirements
+### 2. Konkrete technische Schritte
 
-## Success Criteria
-- Dataset loads without errors
-- All required keys present in output dictionary
-- dyn_mask_bev contains meaningful dynamic information
-- Compatible with existing OpenCOOD training pipeline
+#### Schritt 1: Code-Struktur vorbereiten
+
+Erstelle in deinem OpenPCDet‑artigen Framework drei Konfigurationsdateien:
+
+- `cfgs/lidar_only_pointpillars.yaml`
+- `cfgs/radar_only_pointpillars.yaml`
+- `cfgs/naive_fusion_pointpillars.yaml`
+
+Lege für jedes Modell eine eigene Klasse an (z.B. in `models/`):
+
+```python
+class LidarOnlyPointPillars(nn.Module):
+    # Nur LiDAR-PillarVFE → Scatter → Backbone → Heads
+
+class RadarOnlyPointPillars(nn.Module):
+    # Gleiche Architektur, aber Radar-Eingang
+
+class NaiveFusionPointPillars(nn.Module):
+    # Beide PillarVFE + Scatter, dann Concat der BEV-Features (kein Gate!)
+    # Danach gemeinsamer Backbone + Heads
+```
+
+#### Schritt 2: Daten-Loader anpassen
+
+Dein `data_dict` muss enthalten:
+
+- Für LiDAR‑only: nur `processed_lidar` (voxel_features, coords, num_points)
+- Für Radar‑only: nur `processed_radar`
+- Für naive Fusion: beide, aber ohne jegliche Fusion außer **channel‑weises Concat** der BEV-Features.
+
+**Wichtig:** Für Radar‑only musst du Radar-Punkte genau wie LiDAR-Punkte in Pillars voxeln. Radar hat oft 4 Merkmale (x, y, z, Doppler oder RCS). Stelle sicher, dass `num_point_features` in `pillar_vfe` passend gesetzt ist.
+
+#### Schritt 3: BEV-Feature-Extraktion identifizieren und dokumentieren
+
+Du musst genau wissen:
+
+- Nach dem `PointPillarScatter`: Wie groß ist der BEV‑Tensor?  
+  Format: `(B, C, H, W)` – notiere `C`, `H`, `W`.
+- Welche räumliche Auflösung hat eine Zelle? (z.B. 0.2 m pro Pixel)
+- Wo im Code greifst du später auf diese `spatial_features` zu?
+
+Dokumentiere das in einer Textdatei oder Markdown-Tabelle.
+
+#### Schritt 4: Training durchführen
+
+- **LiDAR‑only** auf **Clear‑Weather**-Daten trainieren (falls vorhanden, sonst gemischt).  
+  Mindestens so lange, bis die Loss-Kurven konvergieren.
+- **Radar‑only** auf **gleichen Daten** trainieren – gleiche Epochen, gleiche Augmentations.
+- **Naive Fusion** ebenfalls trainieren.
+
+**Erwartung:** Radar‑only wird deutlich schlechter sein als LiDAR‑only. Das ist normal und erwünscht – zeigt den Bedarf an Distillation.
+
+#### Schritt 5: Evaluieren und Ergebnisse festhalten
+
+Führe jedes Modell auf **mindestens** den Weather‑Splits aus:
+
+- Clear
+- Fog (light/heavy, falls verfügbar)
+- Rain (light/heavy)
+
+Notiere für jeden:
+
+- mAP (oder eure Hauptmetrik)
+- ggf. Inferenzzeit (FPS) – das ist später wichtig für den „lightweight“-Anspruch
+
+Erstelle eine **Ergebnistabelle** (z.B. in Excel oder Markdown):
+
+| Modell | Clear mAP | Fog mAP | Rain mAP | FPS |
+|--------|-----------|---------|----------|-----|
+| LiDAR‑only | 0.72 | 0.34 | 0.41 | 25 |
+| Radar‑only | 0.38 | 0.36 | 0.39 | 24 |
+| Naive Fusion | 0.70 | 0.45 | 0.50 | 22 |
+
+---
+
+### 3. Was ist *nicht* Teil von WP1?
+
+- **Kein** Gate, keine Reliability-Map, kein Gating.
+- **Keine** Distillation (auch keine Doppler-Maske).
+- **Kein** eingefrorener Teacher.
+- **Kein** gestuftes Training.
+- **Keine** speziellen Loss-Funktionen.
+
+Alles, was über einfaches Concat der BEV-Features hinausgeht, gehört zu späteren WPs.
+
+---
+
+### 4. Dokumentationspflichten (laut Thesis)
+
+Du musst folgendes abgeben:
+
+1. **Config‑Dateien** (vollständig, mit allen Hyperparametern)
+2. **Trainings‑Logs** (z.B. TensorBoard‑Events oder Text‑Logs mit Loss, mAP pro Epoche)
+3. **Ergebnistabelle** (s.o.)
+4. **Dokumentation der BEV‑Tensor‑Shapes** – wo genau im Code die Features vor dem Backbone liegen, z.B.:
+
+   ```python
+   # In NaiveFusionPointPillars.forward():
+   lidar_bev = self.lidar_scatter(lidar_batch_dict)['spatial_features']  # shape: (B, 64, 200, 176)
+   radar_bev = self.radar_scatter(radar_batch_dict)['spatial_features']  # shape: (B, 64, 200, 176)
+   fused_bev = torch.cat([lidar_bev, radar_bev], dim=1)  # shape: (B, 128, 200, 176)
+   # fused_bev geht dann in self.backbone
+   ```
+
+   Halte diese Shapes fest – sie sind Grundlage für WP4 (Reliability) und WP5 (Gate).
+
+5. **Kurze Analyse**: Warum ist Radar‑only so viel schlechter? (weniger Punkte, kein Doppler genutzt, Rauschen, …)
+
+---
+
+### 5. Typische Fallstricke und Lösungen
+
+| Problem | Lösung |
+|---------|--------|
+| Radar‑Punkte haben nur 3 Koordinaten + Doppler | Passe `num_point_features` in `PillarVFE` auf 4 (oder 5 falls RCS). Fehlende Werte mit 0 auffüllen. |
+| Radar‑PillarVFE produziert NaNs wegen zu weniger Punkte pro Pillar | Erhöhe `max_num_points_per_pillar` oder setze minimale Punktzahl auf 1. |
+| Naive Fusion ist nicht besser als LiDAR‑only | Das ist okay – zeigt, dass einfaches Concat nicht ausreicht. Notiere es als Baseline. |
+| Unterschiedliche BEV-Größen durch unterschiedliche Point‑Ranges | Stelle sicher, dass `point_cloud_range` für LiDAR und Radar identisch ist (z.B. [-50, -50, -3, 50, 50, 1]). |
+| Training bricht ab wegen Speichermangel | Reduziere Batch‑Size, oder verwende Gradient Accumulation. |
+
+---
+
+### 6. Meilenstein für WP1
+
+**Du bist fertig mit WP1, wenn:**
+
+- [ ] Alle drei Modelle laufen ohne Fehler durch eine komplette Epoche.
+- [ ] Die Ergebnisse (mAP) sind reproduzierbar – zweimaliges Training liefert ähnliche Werte (±1%).
+- [ ] Du die BEV‑Tensor‑Shapes dokumentiert hast.
+- [ ] Du eine Tabelle mit Ergebnissen unter Clear, Fog, Rain vorliegen hast.
+
+**Dann** gehst du zu WP2 (LiDAR Teacher Modell).
+
+---
+
+### 7. Beispiel für einen Minimal‑Check (Selbsttest)
+
+Führe folgenden Test in einer Python‑Shell aus (nach dem Training):
+
+```python
+# Lade dein LiDAR‑only Modell
+model_lidar = LidarOnlyPointPillars(cfg)
+data = next(iter(val_loader))
+out = model_lidar(data)
+print(out['cls_preds'].shape)   # sollte (B, anchor_number, H, W) sein
+print(out['reg_preds'].shape)   # (B, 7*anchor_number, H, W)
+
+# Gleiche für Radar‑only und naive Fusion
+```
+
+Wenn das klappt, ist WP1 technisch abgeschlossen.

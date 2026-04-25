@@ -1,106 +1,199 @@
-# Lite-BEV Implementation Work Packages
+# Lite-BEV Thesis: Three Core Work Packages
 
 ## Overview
-Seven interconnected work packages for implementing a lightweight LiDAR-Radar BEV fusion model for autonomous driving perception.
+Three interconnected work packages for implementing a lightweight LiDAR-Radar BEV fusion model for autonomous driving perception in adverse weather conditions.
 
 ## Work Package Breakdown
 
-| WP | Title | Main Goal | Complexity |
+| WP | Title (German) | Main Goal | Status |
 |---|---|---|---|
-| **WP1** | Dataset Setup & Preparation | Create LiDAR-Radar fusion dataset with Doppler-based dynamic masks | High |
-| **WP2** | Lite-BEV Model Core | Implement spatial gate architecture with reliability heuristic | High |
-| **WP3** | Motion-Aware Distillation Loss | Create masked distillation loss for dynamic Radar regions | Medium |
-| **WP4** | Multi-Stage Training Pipeline | Implement 3-stage training (Teacher → Distill → Fusion) | High |
-| **WP5** | Baseline & Ablation Experiments | Set up 6 baseline variants for component validation | Medium |
-| **WP6** | Inference & Deployment | Create production-ready inference and evaluation tools | Medium |
-| **WP7** | Automation & Continuous Evaluation | Implement automated experiment framework | High |
-
-## Dependency Graph
-
-```
-WP1 (Dataset)
-  ↓
-WP2 (Model) ← WP3 (Loss)
-  ↓           ↓
-WP4 (Training)
-  ↓
-WP5 (Ablation) → WP6 (Inference)
-  ↓
-WP7 (Automation)
-```
+| **WP1** | Baseline Setup | Stable, reproducible baselines without fusion or distillation | Ready |
+| **WP2** | LiDAR Teacher Model | Prepare frozen LiDAR teacher for distillation supervision | Ready |
+| **WP3** | Motion-Aware Radar Distillation | Train radar encoder with motion-masked distillation | Ready |
 
 ## Implementation Sequence
 
-### Phase 1: Foundation (WP1 + WP2)
-- Create dataset infrastructure
-- Build core model architecture
-- Establish training compatibility
+```
+WP1: Baseline Setup
+    └─ Build three independent PointPillar detectors
+       ├─ LiDAR-only
+       ├─ Radar-only  
+       └─ Naive Fusion (simple concat)
+       
+        ↓ (use LiDAR results as baseline)
+        
+WP2: LiDAR Teacher Model
+    └─ Take best LiDAR-only from WP1
+    └─ Train on Clear-Weather only
+    └─ Freeze for use in distillation
+    
+        ↓ (freeze teacher)
+        
+WP3: Motion-Aware Radar Distillation
+    └─ Extract Doppler velocity from radar points
+    └─ Build dynamic mask (M_dyn) for moving objects
+    └─ Implement masked MSE loss
+    └─ Train radar encoder with distillation from frozen teacher
+```
 
-### Phase 2: Training (WP3 + WP4)
-- Implement distillation loss
-- Set up multi-stage training pipeline
-- Verify stage transitions
+## Detailed Goals per Work Package
 
-### Phase 3: Validation (WP5 + WP6)
-- Run ablation experiments
-- Validate component contributions
-- Optimize inference
+### WP1: Baseline Setup (Detaillierte Beschreibung)
 
-### Phase 4: Automation (WP7)
-- Automate all experiments
-- Generate thesis-ready reports
-- Ensure reproducibility
+**Goal**: Create stable, reproducible baselines without any fusion or distillation.
 
-## Key Metrics & Success Criteria
+**Deliverables**:
+- Three trained PointPillar models:
+  1. **LiDAR-only**: Input only LiDAR points → 3D bounding boxes
+  2. **Radar-only**: Input only Radar points → 3D bounding boxes
+  3. **Naive Fusion**: LiDAR + Radar with simple concat (no gating) → 3D bounding boxes
 
-### Per Work Package
-- **WP1**: Dataset produces valid tensors with meaningful dynamic masks
-- **WP2**: Forward pass outputs PSM/RM with gate values in [0,1]
-- **WP3**: Distillation loss decreases during Stage 2 training
-- **WP4**: All three stages complete without errors
-- **WP5**: Clear performance improvement: naive < baselines < full Lite-BEV
-- **WP6**: Inference >10 Hz, compatible with embedded systems
-- **WP7**: All experiments reproducible with documented results
+**Key Tasks**:
+- Create config files: `cfgs/lidar_only_pointpillars.yaml`, `cfgs/radar_only_pointpillars.yaml`, `cfgs/naive_fusion_pointpillars.yaml`
+- Implement three model classes in `models/`
+- Adapt data loaders to handle both sensors
+- Document BEV feature tensor shapes and spatial resolution
+- Train all three models on identical dataset with same hyperparameters
+- Evaluate on multiple weather conditions: Clear, Fog (light/heavy), Rain (light/heavy)
+
+**Success Metrics**:
+- All three models run without errors through complete epoch
+- Results are reproducible (±1% variance between runs)
+- BEV tensor shapes documented: `(B, C, H, W)`
+- Results table completed (mAP per weather condition + FPS)
+
+**What is NOT included**:
+- No gating, no reliability maps
+- No distillation, no doppler masking
+- No frozen teacher, no staged training
+- No special loss functions
+
+### WP2: LiDAR Teacher Model (Detaillierte Beschreibung)
+
+**Goal**: Prepare a strong, frozen LiDAR model trained on clear weather that serves as ground truth for radar distillation.
+
+**Deliverables**:
+- One trained, frozen LiDAR-only PointPillar model
+- Clear identification of BEV feature level for distillation
+
+**Key Tasks**:
+- Take best LiDAR-only model from WP1
+- **Retrain on Clear-Weather data only** (not mixed weather)
+- Freeze all parameters: `requires_grad = False`, `eval()`
+- Select specific layer as teacher target (recommended: features after PointPillarScatter)
+- Document feature level:
+  - Variable name in code
+  - Shape: `(B, C, H, W)` with specific C, H, W values
+  - How to extract in forward pass
+- Save teacher checkpoint: `checkpoints/lidar_teacher_clear_weather.pth`
+- Validate performance on Clear/Fog/Rain splits
+
+**Success Metrics**:
+- Teacher model frozen and cannot be updated
+- Clear documentation of which layer is used as distillation target
+- Checkpoint can be loaded in separate script
+- Validation metrics on Clear, Fog, Rain splits documented
+
+**What is NOT included**:
+- No distillation (that's WP3)
+- No radar training
+- No fusion, no gating, no reliability maps
+- No architecture changes
+
+### WP3: Motion-Aware Radar Distillation (Detaillierte Vorbereitung)
+
+**Goal**: Train radar encoder using frozen teacher knowledge, masked only to dynamic regions by Doppler velocity.
+
+**Deliverables**:
+- Doppler-based dynamic mask generation function
+- Custom masked distillation loss implementation
+- One trained distilled radar-only model checkpoint
+
+**Key Tasks**:
+- Extract Doppler (radial velocity) from radar points: `v_r`
+- Build dynamic mask algorithm:
+  1. Project radar points to BEV coordinates
+  2. For each pillar: if any point has `|v_r| > 0.5 m/s`, mark as dynamic
+  3. Optional: dilate mask (3×3) to capture object surroundings
+- Implement masked MSE loss: `L_distill = ||( F_R - F_L_teacher ) × M_dyn ||²`
+- Integrate into training loop:
+  - Total loss = `L_detection + lambda * L_distill` (start with `lambda = 0.1`)
+- Train radar-only model on Clear-Weather with distillation
+- Create qualitative visualizations showing radar BEV features before/after distillation
+
+**Success Metrics**:
+- Dynamic mask correctly identifies moving objects
+- Distillation loss decreases during training
+- Radar model shows improvement over non-distilled baseline (expect +2-5% mAP on Clear)
+- Radar BEV features visually similar to LiDAR features in dynamic regions
+- Performance improves on Fog/Rain due to better geometric priors
+
+**What is NOT included**:
+- No fusion with LiDAR
+- No reliability map (WP4 in extended version)
+- No gating mechanism
+- No training on mixed weather (Clear only)
+- No modifications to frozen teacher
+
+## Key Design Decisions
+
+**Dataset**:
+- Doppler velocity threshold: `|v_r| > 0.5 m/s` for dynamic regions
+- BEV pillar-based aggregation for dynamic mask
+
+**Architecture**:
+- Base: PointPillar encoder (VFE + Scatter + Backbone)
+- Three independent training tracks in sequence
+- Teacher model frozen after WP2
+
+**Training**:
+- WP1: Train baselines on identical clean dataset
+- WP2: Retrain LiDAR on Clear-Weather subset, then freeze
+- WP3: Train Radar with masked distillation from frozen teacher
+
+**Evaluation**:
+- Multiple weather conditions: Clear, Fog (light/heavy), Rain (light/heavy)
+- Metrics: mAP (primary), NDS (if applicable), FPS (for "lightweight" claim)
+- Qualitative: BEV feature heatmaps, mask visualizations
+
+## Repository Structure
+
+```
+seid-tasks/
+├── docs/workpackages/
+│   ├── WP1_Dataset.md                    ← Baseline Setup details
+│   ├── WP2_Model_Core.md                 ← Teacher Model details
+│   └── WP3_Distillation_Loss.md          ← Motion-Aware Distillation details
+├── .gitlab/
+│   └── issue_templates/
+│       └── workpackage.md                ← Issue template
+└── WORKPACKAGES_SUMMARY.md               ← This file
+```
 
 ## GitLab Issues
-All work packages have been created as GitLab issues in the repository:
-- Issue #1: WP1 - Dataset
-- Issue #2: WP2 - Model Core
-- Issue #3: WP3 - Distillation Loss
-- Issue #4: WP4 - Training Pipeline
-- Issue #5: WP5 - Ablation Experiments
-- Issue #6: WP6 - Inference & Deployment
-- Issue #7: WP7 - Automation
 
-## Documentation
-Detailed specifications for each work package are in `docs/workpackages/`:
-- `WP1_Dataset.md`
-- `WP2_Model_Core.md`
-- `WP3_Distillation_Loss.md`
-- `WP4_Training_Pipeline.md`
-- `WP5_Ablation.md`
-- `WP6_Inference.md`
-- `WP7_Automation.md`
+All work packages have been created as GitLab issues:
+- **Issue #1**: WP1 - Baseline Setup
+- **Issue #2**: WP2 - LiDAR Teacher Model
+- **Issue #3**: WP3 - Motion-Aware Radar Distillation
 
-## Main Goals at a Glance
+Closed non-relevant issues:
+- Issues #4-7 (originally placeholder issues)
 
-### 1. Lightweight Fusion Architecture
-Implement BEV-level fusion without heavy Transformer cross-attention for real-time inference.
+## Next Steps
 
-### 2. Motion-Aware Learning
-Use Radar velocity information to guide distillation only in dynamic regions where Radar is reliable.
+1. Review each issue and detailed documentation in `docs/workpackages/`
+2. Start with **WP1**: Build three baseline models
+3. Once baselines are stable, proceed to **WP2**: Prepare teacher
+4. Finally, implement **WP3**: Motion-aware distillation
+5. Track progress in GitLab by updating issue status
 
-### 3. Spatial Gating
-Learn adaptive sensor weighting through spatial gate mechanism conditioned on reliability maps.
+## Extended Roadmap (Future Work)
 
-### 4. Three-Stage Training
-Separate training for robustness: Teacher pretraining → Radar branch learning → Full fusion fine-tuning.
+Future work packages (beyond current scope) could include:
+- **WP4**: LiDAR Reliability Estimation (heuristic or learned)
+- **WP5**: Reliability-Guided Gated Fusion (gate mechanism + combined training)
+- **WP6**: Inference & Deployment (production-ready pipeline)
+- **WP7**: Automation & Continuous Evaluation (automated experiments)
 
-### 5. Systematic Validation
-Comprehensive ablation studies to validate each component's contribution.
-
-### 6. Production Readiness
-Efficient inference pipeline suitable for real-time autonomous driving systems.
-
-### 7. Reproducible Research
-Fully automated experiment framework for thesis validation and future extension.
+These would build upon the foundation of WP1-WP3.
