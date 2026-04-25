@@ -18,6 +18,8 @@ cd existing_repo
 git remote add origin https://ids-git.fzi.de/jm266/seid-tasks.git
 git branch -M main
 git push -uf origin main
+# add wiki as a submodule
+git submodule add git@ids-git.fzi.de:jm266/seid-tasks.wiki.git wiki
 ```
 
 ## Integrate with your tools
