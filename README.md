@@ -4,7 +4,7 @@ This repository manages the tasks and documentation for the Master's Thesis: **"
 
 ## Project Wiki
 Detailed documentation, work packages, and meeting notes can be found in the project Wiki:
-👉 **[Go to Wiki](./wiki/home.md)** (or use the GitLab Wiki tab)
+👉 **[Go to Wiki](https://ids-git.fzi.de/jm266/seid-tasks/-/wikis/home)** (or use the GitLab Wiki tab)
 
 ---
 
