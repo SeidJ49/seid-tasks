@@ -1,5 +1,4 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
+
 # Lite-BEV: Lightweight LiDAR-Radar BEV Fusion
 
 This repository manages the tasks and documentation for the Master's Thesis: **"Lite-BEV: Lightweight LiDAR-Radar BEV Fusion for Robust 3D Object Detection in Adverse Weather"**.
@@ -34,7 +33,6 @@ git submodule update --init --recursive
 ```
 =======
 =======
->>>>>>> bm2cp/TruckScences
 # BM2CP
 [CoRL 2023] BM2CP: Efficient Collaborative Perception with LiDAR-Camera Modalities
 
@@ -197,7 +195,3 @@ Thanks for the insightful previous works in cooperative perception field.
 
 **DAIR-V2X: A Large-Scale Dataset for Vehicle-Infrastructure Cooperative 3D Object Detection** *CVPR2022* [[Paper]](https://arxiv.org/abs/2204.05575) [[Website]](https://thudair.baai.ac.cn/index) [[Code]](https://github.com/AIR-THU/DAIR-V2X)
 
-<<<<<<< HEAD
->>>>>>> bm2cp/TruckScences
-=======
->>>>>>> bm2cp/TruckScences

@@ -77,7 +77,7 @@ def main():
         saved_path = opt.model_dir
         init_epoch, model = train_utils.load_saved_model(saved_path, model)
         lowest_val_epoch = init_epoch
-        scheduler = train_utils.setup_lr_schedular(hypes, optimizer, init_epoch=init_epoch)
+        scheduler = train_utils.setup_lr_schedular(hypes, optimizer, init_epoch=init_epoch, steps_per_epoch=max(len(train_loader), 1))
         print(f"resume from {init_epoch} epoch.")
 
     else:
@@ -85,7 +85,7 @@ def main():
         # if we train the model from scratch, we need to create a folder
         # to save the model,
         saved_path = train_utils.setup_train(hypes)
-        scheduler = train_utils.setup_lr_schedular(hypes, optimizer)
+        scheduler = train_utils.setup_lr_schedular(hypes, optimizer, steps_per_epoch=max(len(train_loader), 1))
 
     # we assume gpu is necessary
     if torch.cuda.is_available():
@@ -123,6 +123,8 @@ def main():
             # back-propagation
             final_loss.backward()
             optimizer.step()
+            if getattr(scheduler, 'step_per_batch', False):
+                scheduler.step()
 
             # torch.cuda.empty_cache()
 
@@ -166,7 +168,8 @@ def main():
             torch.save(model.state_dict(),
                        os.path.join(saved_path,
                                     'net_epoch%d.pth' % (epoch + 1)))
-        scheduler.step(epoch)
+        if not getattr(scheduler, 'step_per_batch', False):
+            scheduler.step(epoch)
 
         opencood_train_dataset.reinitialize()
 

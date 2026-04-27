@@ -269,7 +269,7 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             lidar_np = mask_ego_points(lidar_np) # FIXME: check it
 
             lidar_dict = self.lidar_pre_processor.preprocess(lidar_np)
-            selected_cav_processed.update({'processed_lidar': lidar_dict})
+            selected_cav_processed.update({'processed_lidar': lidar_dict, 'lidar_points': lidar_np.astype(np.float32)})
         # --------------------------------------------------------------------------------------------------------------
 
         # --- RADAR ----------------------------------------------------------------------------------------------------
@@ -280,7 +280,7 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             radar_np = mask_ego_points(radar_np) # FIXME: check it
 
             radar_dict = self.radar_pre_processor.preprocess(radar_np)
-            selected_cav_processed.update({'processed_radar': radar_dict})
+            selected_cav_processed.update({'processed_radar': radar_dict, 'radar_points': radar_np.astype(np.float32)})
 
         if self.visualize:
             selected_cav_processed.update({'origin_lidar': lidar_np})
@@ -308,6 +308,8 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
         object_bbx_center = []
         object_bbx_mask = []
+        lidar_points_list = []
+        radar_points_list = []
         processed_lidar_list = []
         processed_radar_list = []
         label_dict_list = []
@@ -318,6 +320,8 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             object_bbx_center.append(ego_dict['object_bbx_center'])
             object_bbx_mask.append(ego_dict['object_bbx_mask'])
             label_dict_list.append(ego_dict['label_dict'])
+            lidar_points_list.append(ego_dict['lidar_points'])
+            radar_points_list.append(ego_dict['radar_points'])
 
             if self.visualize:
                 origin_lidar.append(ego_dict['origin_lidar'])
@@ -333,7 +337,9 @@ class SingleDatasetLidarRadarBaseline(Dataset):
         output_dict['ego'].update({'object_bbx_center': object_bbx_center,
                                    'object_bbx_mask': object_bbx_mask,
                                    'anchor_box': torch.from_numpy(self.anchor_box),
-                                   'label_dict': label_torch_dict})
+                                   'label_dict': label_torch_dict,
+                                   'lidar_points': self._collate_points(lidar_points_list),
+                                   'radar_points': self._collate_points(radar_points_list)})
         if self.visualize:
             origin_lidar = np.array(downsample_lidar_minimum(pcd_np_list=origin_lidar))
             origin_lidar = torch.from_numpy(origin_lidar)
@@ -374,6 +380,10 @@ class SingleDatasetLidarRadarBaseline(Dataset):
         object_ids = cav_content['object_ids']
 
         output_dict[cav_id].update({"anchor_box": self.anchor_box_torch})
+        output_dict[cav_id].update({
+            'lidar_points': self._collate_points([cav_content['lidar_points']]),
+            'radar_points': self._collate_points([cav_content['radar_points']]),
+        })
 
         if self.load_lidar_file:
             processed_lidar_torch_dict = self.lidar_pre_processor.collate_batch([cav_content['processed_lidar']])
@@ -410,12 +420,20 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
 
     def post_process(self, data_dict, output_dict):
+        if 'final_box_dict' in output_dict:
+            gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
+            final_dict = output_dict['final_box_dict'][0]
+            return final_dict['pred_boxes'], final_dict['pred_scores'], gt_box_tensor
         pred_box_tensor, pred_score = self.post_processor.post_process(data_dict, output_dict)
         gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
 
         return pred_box_tensor, pred_score, gt_box_tensor
 
     def post_process_no_fusion(self, data_dict, output_dict_ego):
+        if 'final_box_dict' in output_dict_ego:
+            gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
+            final_dict = output_dict_ego['final_box_dict'][0]
+            return final_dict['pred_boxes'], final_dict['pred_scores'], gt_box_tensor
         data_dict_ego = OrderedDict()
         data_dict_ego["ego"] = data_dict["ego"]
         gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
@@ -424,6 +442,10 @@ class SingleDatasetLidarRadarBaseline(Dataset):
         return pred_box_tensor, pred_score, gt_box_tensor
 
     def post_process_no_fusion_uncertainty(self, data_dict, output_dict_ego):
+        if 'final_box_dict' in output_dict_ego:
+            gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
+            final_dict = output_dict_ego['final_box_dict'][0]
+            return final_dict['pred_boxes'], final_dict['pred_scores'], gt_box_tensor, None
         data_dict_ego = OrderedDict()
         data_dict_ego['ego'] = data_dict['ego']
         gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
@@ -475,3 +497,11 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
         result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel))
         return result_np
+
+    @staticmethod
+    def _collate_points(points_list):
+        collated = []
+        for batch_index, points in enumerate(points_list):
+            batch_column = np.full((points.shape[0], 1), batch_index, dtype=np.float32)
+            collated.append(np.concatenate([batch_column, points.astype(np.float32)], axis=1))
+        return torch.from_numpy(np.concatenate(collated, axis=0)).float()

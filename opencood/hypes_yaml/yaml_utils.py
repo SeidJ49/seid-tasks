@@ -180,6 +180,30 @@ def load_second_params(param):
     return param
 
 
+def load_pillarnet_radar_params(param):
+    cav_lidar_range = param['preprocess']['cav_lidar_range']
+    voxel_size = param['preprocess']['args']['voxel_size']
+
+    anchor_args = param['postprocess']['anchor_args']
+    anchor_args['vw'] = voxel_size[0]
+    anchor_args['vh'] = voxel_size[1]
+    anchor_args['vd'] = voxel_size[2]
+    anchor_args['W'] = math.ceil((cav_lidar_range[3] - cav_lidar_range[0]) / voxel_size[0])
+    anchor_args['H'] = math.ceil((cav_lidar_range[4] - cav_lidar_range[1]) / voxel_size[1])
+    anchor_args['D'] = math.ceil((cav_lidar_range[5] - cav_lidar_range[2]) / voxel_size[2])
+    param['postprocess']['anchor_args'] = anchor_args
+
+    model_voxel_size = param['model']['args'].get('model_voxel_size', param['model']['args']['voxel_size'])
+    model_range = param['model']['args'].get('model_lidar_range', param['model']['args']['lidar_range'])
+    grid_size = (np.array(model_range[3:6]) - np.array(model_range[0:3])) / np.array(model_voxel_size)
+    grid_size = np.round(grid_size).astype(np.int64)
+
+    param['model']['args']['grid_size'] = grid_size
+    param['model']['args']['voxel_size'] = model_voxel_size
+    param['model']['args']['lidar_range'] = model_range
+    return param
+
+
 def load_bev_params(param):
     """
     Load bev related geometry parameters s.t. boundary, resolutions, input

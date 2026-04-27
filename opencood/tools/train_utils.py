@@ -272,7 +272,7 @@ def setup_optimizer(hypes, model):
                                 lr=method_dict['lr'])
 
 
-def setup_lr_schedular(hypes, optimizer, init_epoch=None):
+def setup_lr_schedular(hypes, optimizer, init_epoch=None, steps_per_epoch=None):
     """
     Set up the learning rate schedular.
 
@@ -292,6 +292,7 @@ def setup_lr_schedular(hypes, optimizer, init_epoch=None):
         step_size = lr_schedule_config['step_size']
         gamma = lr_schedule_config['gamma']
         scheduler = StepLR(optimizer, step_size=step_size, gamma=gamma)
+        scheduler.step_per_batch = False
 
     elif lr_schedule_config['core_method'] == 'multistep':
         from torch.optim.lr_scheduler import MultiStepLR
@@ -300,14 +301,33 @@ def setup_lr_schedular(hypes, optimizer, init_epoch=None):
         scheduler = MultiStepLR(optimizer,
                                 milestones=milestones,
                                 gamma=gamma)
+        scheduler.step_per_batch = False
+
+    elif lr_schedule_config['core_method'] == 'onecycle':
+        from torch.optim.lr_scheduler import OneCycleLR
+        if steps_per_epoch is None:
+            raise ValueError('steps_per_epoch is required for onecycle scheduling')
+        scheduler = OneCycleLR(
+            optimizer,
+            max_lr=lr_schedule_config.get('max_lr', hypes['optimizer']['lr']),
+            epochs=hypes['train_params']['epoches'],
+            steps_per_epoch=steps_per_epoch,
+            pct_start=lr_schedule_config.get('pct_start', 0.4),
+            div_factor=lr_schedule_config.get('div_factor', 10.0),
+            final_div_factor=lr_schedule_config.get('final_div_factor', 1e4),
+            anneal_strategy=lr_schedule_config.get('anneal_strategy', 'cos'),
+        )
+        scheduler.step_per_batch = True
 
     else:
         from torch.optim.lr_scheduler import ExponentialLR
         gamma = lr_schedule_config['gamma']
         scheduler = ExponentialLR(optimizer, gamma)
+        scheduler.step_per_batch = False
 
-    for _ in range(last_epoch):
-        scheduler.step()
+    if not getattr(scheduler, 'step_per_batch', False):
+        for _ in range(last_epoch):
+            scheduler.step()
 
     return scheduler
 
