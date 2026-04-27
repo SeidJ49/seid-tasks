@@ -1,37 +1,13 @@
-<<<<<<< HEAD
-# Lite-BEV: Lightweight LiDAR-Radar BEV Fusion
+Metadata-Version: 2.1
+Name: OpenCOOD
+Version: 0.1.0
+Summary: An opensource pytorch framework for autonomous driving cooperative detection
+Home-page: https://github.com/ucla-mobility/OpenCDA.git
+Author: Runsheng Xu, Hao Xiang
+Author-email: rxx3386@ucla.edu
+License: MIT
+License-File: LICENSE
 
-This repository manages the tasks and documentation for the Master's Thesis: **"Lite-BEV: Lightweight LiDAR-Radar BEV Fusion for Robust 3D Object Detection in Adverse Weather"**.
-
-## Project Wiki
-Detailed documentation, work packages, and meeting notes can be found in the project Wiki:
-👉 **[Go to Wiki](https://ids-git.fzi.de/jm266/seid-tasks/-/wikis/home)** (or use the GitLab Wiki tab)
-
----
-
-## Thesis Overview
-This thesis investigates multi-modal sensor fusion methods combining **LiDAR and 4D Radar** for 3D object detection in autonomous driving, specifically focusing on performance under adverse weather conditions (rain, fog). 
-
-To address the limitations of LiDAR in poor visibility, this work proposes **Lite-BEV**, a lightweight Bird’s-Eye View (BEV) fusion framework. The approach avoids computationally expensive Transformer-based cross-attention and instead leverages two core mechanisms:
-
-1.  **Doppler-Masked Geometric Distillation:** A training strategy where a 4D Radar encoder learns LiDAR-quality geometric features, specifically for dynamic objects identified via Radar's radial velocity.
-2.  **Aleatoric Uncertainty-Driven Gating:** An inference-time fusion gate that dynamically switches between LiDAR and Radar based on estimated LiDAR reliability (e.g., spatial variance or point density drops in fog/rain).
-
-The method is built upon the **OpenPCDet** framework, using **PointPillars** as a baseline, and is evaluated on the **MANtruckscenes** dataset.
-
----
-
-## Repository Structure
-- `docs/workpackages/`: Detailed technical descriptions of each work package.
-- `wiki/`: Project documentation and progress logs (synced as a submodule).
-- `.gitlab/issue_templates/`: Templates for creating work-package related issues.
-
-## Getting Started
-To initialize the wiki submodule:
-```bash
-git submodule update --init --recursive
-```
-=======
 # BM2CP
 [CoRL 2023] BM2CP: Efficient Collaborative Perception with LiDAR-Camera Modalities
 
@@ -194,4 +170,3 @@ Thanks for the insightful previous works in cooperative perception field.
 
 **DAIR-V2X: A Large-Scale Dataset for Vehicle-Infrastructure Cooperative 3D Object Detection** *CVPR2022* [[Paper]](https://arxiv.org/abs/2204.05575) [[Website]](https://thudair.baai.ac.cn/index) [[Code]](https://github.com/AIR-THU/DAIR-V2X)
 
->>>>>>> bm2cp/TruckScences
