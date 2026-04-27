@@ -1,1 +1,16 @@
+<<<<<<< HEAD
 wiki/
+=======
+# Ignore everything globally
+/*
+
+# Un-ignore the opencood folder
+!opencood/
+!logreplay/
+!Debug/
+
+# Ignore specific folders within opencood
+opencood/logs/
+opencood/pcdet_utils/
+opencood/pypcd/
+>>>>>>> bm2cp/main
