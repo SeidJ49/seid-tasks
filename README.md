@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Lite-BEV: Lightweight LiDAR-Radar BEV Fusion
 
 This repository manages the tasks and documentation for the Master's Thesis: **"Lite-BEV: Lightweight LiDAR-Radar BEV Fusion for Robust 3D Object Detection in Adverse Weather"**.
@@ -10,7 +9,7 @@ Detailed documentation, work packages, and meeting notes can be found in the pro
 ---
 
 ## Thesis Overview
-This thesis investigates multi-modal sensor fusion methods combining **LiDAR and 4D Radar** for 3D object detection in autonomous driving, specifically focusing on performance under adverse weather conditions (rain, fog). 
+This thesis investigates multi-modal sensor fusion methods combining **LiDAR and 4D Radar** for 3D object detection in autonomous driving, specifically focusing on performance under adverse weather conditions (rain, fog).
 
 To address the limitations of LiDAR in poor visibility, this work proposes **Lite-BEV**, a lightweight Bird’s-Eye View (BEV) fusion framework. The approach avoids computationally expensive Transformer-based cross-attention and instead leverages two core mechanisms:
 
@@ -31,6 +30,7 @@ To initialize the wiki submodule:
 ```bash
 git submodule update --init --recursive
 ```
+
 =======
 # BM2CP
 [CoRL 2023] BM2CP: Efficient Collaborative Perception with LiDAR-Camera Modalities
@@ -43,7 +43,7 @@ git submodule update --init --recursive
 ## Updates
 - 2024/04/29 Support BM2CP in OPV2V dataset.
 - 2024/03/12 Support How2comm(NeurIPS2023).
-- 2024/01/28 Support OPV2V dataset. Support SCOPE(ICCV2023). Fix bugs in fusion dataset that cause abnormal performance in presence of pose error. 
+- 2024/01/28 Support OPV2V dataset. Support SCOPE(ICCV2023). Fix bugs in fusion dataset that cause abnormal performance in presence of pose error.
 - 2023/11/30 First version.
 
 
@@ -79,7 +79,7 @@ git submodule update --init --recursive
 
 
 ## Quick Start
-#### Download dataset 
+#### Download dataset
 ##### 1. OPV2V
 Download raw data of [OPV2V](https://drive.google.com/drive/folders/1dkDeHlwOVbmgXcDazZvO6TFEZ6V_7WUu) relseased by Official.
 ##### 2. DAIR-V2X
@@ -87,7 +87,7 @@ Download raw data of [OPV2V](https://drive.google.com/drive/folders/1dkDeHlwOVbm
 2. Download complemented annotation from [Yifan Lu](https://github.com/yifanlu0227/CoAlign).
 
 #### Install
-Please refer to the [INSTALL.md](./INSTALL.md) for detailed documentations. 
+Please refer to the [INSTALL.md](./INSTALL.md) for detailed documentations.
 
 
 #### Train your model
@@ -161,18 +161,18 @@ Thanks for the insightful previous works in cooperative perception field.
 
 ### Methods
 
-**V2VNet: Vehicle-to-vehicle communication for joint perception and prediction** 
-*ECCV20* [[Paper]](https://arxiv.org/abs/2008.07519) 
+**V2VNet: Vehicle-to-vehicle communication for joint perception and prediction**
+*ECCV20* [[Paper]](https://arxiv.org/abs/2008.07519)
 
-**When2com: Multi-agent perception via communication graph grouping** 
+**When2com: Multi-agent perception via communication graph grouping**
 *CVPR20* [[Paper]](https://arxiv.org/abs/2006.00176) [[Code]](https://arxiv.org/abs/2006.00176)
 
-**Learning Distilled Collaboration Graph for Multi-Agent Perception** 
+**Learning Distilled Collaboration Graph for Multi-Agent Perception**
 *NeurIPS21* [[Paper]](https://arxiv.org/abs/2111.00643) [[Code]](https://github.com/DerrickXuNu/OpenCOOD)
 
 **V2X-ViT: Vehicle-to-Everything Cooperative Perception with Vision Transformer** *ECCV2022* [[Paper]](https://arxiv.org/abs/2203.10638) [[Code]](https://github.com/DerrickXuNu/v2x-vit) [[Talk]](https://course.zhidx.com/c/MmQ1YWUyMzM1M2I3YzVlZjE1NzM=)
 
-**Self-Supervised Collaborative Scene Completion: Towards Task-Agnostic Multi-Robot Perception** 
+**Self-Supervised Collaborative Scene Completion: Towards Task-Agnostic Multi-Robot Perception**
 *CoRL2022* [[Paper]](https://openreview.net/forum?id=hW0tcXOJas2)
 
 **CoBEVT: Cooperative Bird's Eye View Semantic Segmentation with Sparse Transformers** *CoRL2022* [[Paper]](https://arxiv.org/abs/2207.02202) [[Code]](https://github.com/DerrickXuNu/CoBEVT)
@@ -186,12 +186,11 @@ Thanks for the insightful previous works in cooperative perception field.
 
 ### Datasets
 
-**OPV2V: An Open Benchmark Dataset and Fusion Pipeline for Perception with Vehicle-to-Vehicle Communication** 
+**OPV2V: An Open Benchmark Dataset and Fusion Pipeline for Perception with Vehicle-to-Vehicle Communication**
 *ICRA2022* [[Paper]](https://arxiv.org/abs/2109.07644) [[Website]](https://mobility-lab.seas.ucla.edu/opv2v/) [[Code]](https://github.com/DerrickXuNu/OpenCOOD)
 
-**V2X-Sim: A Virtual Collaborative Perception Dataset and Benchmark for Autonomous Driving** 
+**V2X-Sim: A Virtual Collaborative Perception Dataset and Benchmark for Autonomous Driving**
 *RAL21* [[Paper]](https://arxiv.org/abs/2111.00643) [[Website]](https://ai4ce.github.io/V2X-Sim/)[[Code]](https://github.com/ai4ce/V2X-Sim)
 
 **DAIR-V2X: A Large-Scale Dataset for Vehicle-Infrastructure Cooperative 3D Object Detection** *CVPR2022* [[Paper]](https://arxiv.org/abs/2204.05575) [[Website]](https://thudair.baai.ac.cn/index) [[Code]](https://github.com/AIR-THU/DAIR-V2X)
 
->>>>>>> bm2cp/main

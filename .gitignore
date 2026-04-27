@@ -1,6 +1,4 @@
-<<<<<<< HEAD
 wiki/
-=======
 # Ignore everything globally
 /*
 
@@ -13,4 +11,3 @@ wiki/
 opencood/logs/
 opencood/pcdet_utils/
 opencood/pypcd/
->>>>>>> bm2cp/main
