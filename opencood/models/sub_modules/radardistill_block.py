@@ -13,6 +13,9 @@ def clip_sigmoid(x, eps=1e-4):
 class RadarDistill(BaseBEVBackboneV2):
     def __init__(self, model_cfg):
         super().__init__(model_cfg)
+        # NOTE: These encoder/decoder/aggregation blocks are the OpenCOOD
+        # implementation of the paper's CMA step, which densifies radar BEV
+        # features before the higher-level distillation losses are applied.
         self.encoder_1 = nn.Sequential(ConvNeXtBlock(dim=256, downsample=True), ConvNeXtBlock(dim=256, downsample=False))
         self.decoder_1 = nn.Sequential(nn.ConvTranspose2d(256, 256, 4, 2, 1), nn.BatchNorm2d(256), nn.GELU())
         self.agg_1 = nn.Sequential(nn.Conv2d(512, 256, 1), nn.BatchNorm2d(256), nn.GELU())
@@ -26,6 +29,10 @@ class RadarDistill(BaseBEVBackboneV2):
         self.agg_3 = nn.Sequential(nn.Conv2d(512, 256, 1), nn.BatchNorm2d(256), nn.GELU())
 
     def low_loss(self, lidar_bev, radar_bev):
+        # NOTE: This is the AFD part of RadarDistill. It builds activation-aware
+        # masks from LiDAR and radar BEV features, then distills low-level radar
+        # features toward LiDAR features with separate weighting for overlap and
+        # radar-only regions.
         batch_size = radar_bev.shape[0]
         lidar_mask = (lidar_bev.sum(1, keepdim=True) > 0).float()
         radar_mask = radar_bev.sum(1, keepdim=True)
@@ -49,6 +56,9 @@ class RadarDistill(BaseBEVBackboneV2):
         return feature_loss, mask_loss
 
     def high_loss(self, radar_bev, radar_bev_8x, lidar_bev, lidar_bev_8x, heatmaps, radar_preds):
+        # NOTE: This is the PFD part of RadarDistill. It uses proposal/heatmap
+        # signals to emphasize teacher-student matching around likely objects
+        # and hard proposal regions instead of treating all BEV locations equally.
         gt_batch_hm = torch.cat(heatmaps, dim=1)
         gt_batch_hm_max = torch.max(gt_batch_hm, dim=1, keepdim=True)[0]
         radar_batch_hm = [clip_sigmoid(pred_dict['hm']) for pred_dict in radar_preds]
@@ -94,6 +104,9 @@ class RadarDistill(BaseBEVBackboneV2):
             batch_dict['target_dicts']['heatmaps'],
             batch_dict['radar_pred_dicts'],
         ) * 25
+        # NOTE: The final RadarDistill loss is the sum of the low-level AFD term
+        # and the proposal-guided PFD term, matching the original RadarDistill
+        # training objective inside the distillation backbone.
         low_distill_loss = (0.5 * (feature_loss + de8x_feature_loss) + 0.5 * (mask_loss + de8x_mask_loss)) * 5
         distill_loss = low_distill_loss + high_distill_loss
 

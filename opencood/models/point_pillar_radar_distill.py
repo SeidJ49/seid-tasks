@@ -18,6 +18,7 @@ class PointPillarRadarDistill(nn.Module):
         self.class_names = args['class_names']
         self.train_stage = args.get('train_stage', 'distill')
         self.freeze_teacher = args.get('freeze_teacher', True)
+        self.init_radar_from_teacher = args.get('init_radar_from_teacher', self.train_stage != 'teacher')
         self.radar_loss_weight = args.get('radar_loss_weight', 1.0)
         self.distill_loss_weight = args.get('distill_loss_weight', 1.0)
         self.teacher_loss_weight = args.get('teacher_loss_weight', 1.0)
@@ -69,12 +70,30 @@ class PointPillarRadarDistill(nn.Module):
             state_dict = state_dict['state_dict']
 
         teacher_prefixes = ('lidar_vfe.', 'teacher_backbone.', 'teacher_bev_backbone.', 'teacher_head.')
+        teacher_to_radar_prefixes = {
+            'lidar_vfe.': 'radar_vfe.',
+            'teacher_backbone.': 'radar_backbone.',
+            'teacher_bev_backbone.': 'radar_distill.',
+            'teacher_head.': 'radar_head.',
+        }
         filtered_state = {}
         model_state = self.state_dict()
         for key, value in state_dict.items():
             clean_key = key[7:] if key.startswith('module.') else key
             if clean_key.startswith(teacher_prefixes) and clean_key in model_state and model_state[clean_key].shape == value.shape:
                 filtered_state[clean_key] = value
+
+            if not self.init_radar_from_teacher:
+                continue
+
+            for teacher_prefix, radar_prefix in teacher_to_radar_prefixes.items():
+                if not clean_key.startswith(teacher_prefix):
+                    continue
+
+                radar_key = radar_prefix + clean_key[len(teacher_prefix):]
+                if radar_key in model_state and model_state[radar_key].shape == value.shape:
+                    filtered_state[radar_key] = value
+                break
 
         self.load_state_dict(filtered_state, strict=False)
 
