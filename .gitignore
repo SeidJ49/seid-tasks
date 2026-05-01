@@ -23,3 +23,8 @@ build/lib.linux-x86_64-cpython-37/opencood/pcdet_utils/roiaware_pool3d/roiaware_
 build/temp.linux-x86_64-cpython-37/.ninja_deps
 build/temp.linux-x86_64-cpython-37/.ninja_log
 build/temp.linux-x86_64-cpython-37/build.ninja
+*.pyc
+man-truckscenes_sensordata_v1.2-mini/
+opencood/logs/
+pkl_generator_truckscences_opencood_sweeps_5_mini.py
+.codex
