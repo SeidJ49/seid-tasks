@@ -69,7 +69,7 @@ model:
     class_names: ['car', 'truck', 'bus', 'trailer', 'other_vehicle']
     train_stage: distill
     freeze_teacher: true
-    teacher_ckpt: ''
+    teacher_ckpt: '/home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_teacher_2026_05_01_16_35_17/net_epoch18.pth'
     teacher_loss_weight: 1.0
     radar_loss_weight: 1.0
     distill_loss_weight: 1.0

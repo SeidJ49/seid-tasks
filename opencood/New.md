@@ -1,3 +1,246 @@
+# RadarDistill In OpenCOOD
+
+This note is the current runbook for the RadarDistill port in this OpenCOOD checkout.
+It focuses on the training flow that is working in this repository now:
+
+- train the LiDAR teacher first
+- use that checkpoint for radar distillation
+- optionally run joint training afterward
+
+The active project root is:
+
+```bash
+/home/nj644/dev/Studis/seid-tasks/opencood
+```
+
+The Python environment used for the validated runs is:
+
+```bash
+/home/nj644/dev/anaconda3/envs/bm2cp_v2/bin/python
+```
+
+## What Is Implemented
+
+- LiDAR teacher stage
+- radar distillation stage
+- joint stage
+- multi-class TruckScenes setup with 5 classes:
+	- `car`
+	- `truck`
+	- `bus`
+	- `trailer`
+	- `other_vehicle`
+- teacher-to-radar initialization when `teacher_ckpt` is provided for distill or joint
+- source-like RadarDistill block with the same CMA/AFD/PFD ideas implemented in `models/sub_modules/radardistill_block.py`
+
+## Main Configs
+
+- Teacher:
+	- `hypes_yaml/truckscences_lidar_radar/pillarnet_radar_teacher.yaml`
+- Distill:
+	- `hypes_yaml/truckscences_lidar_radar/pillarnet_radar_distill.yaml`
+- Joint:
+	- `hypes_yaml/truckscences_lidar_radar/pillarnet_radar_joint.yaml`
+
+## Training Stages
+
+### 1. Teacher Training
+
+Teacher training uses only the LiDAR teacher branch.
+
+Relevant config values:
+
+- `train_stage: teacher`
+- `freeze_teacher: false`
+- `input_source: ['lidar']`
+- `label_type: 'lidar'`
+
+Single-GPU command:
+
+```bash
+/home/nj644/dev/anaconda3/envs/bm2cp_v2/bin/python \
+	/home/nj644/dev/Studis/seid-tasks/opencood/tools/train.py \
+	--hypes_yaml /home/nj644/dev/Studis/seid-tasks/opencood/hypes_yaml/truckscences_lidar_radar/pillarnet_radar_teacher.yaml
+```
+
+DDP example:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 \
+/home/nj644/dev/anaconda3/envs/bm2cp_v2/bin/python -m torch.distributed.launch \
+	--nproc_per_node=2 --use_env \
+	/home/nj644/dev/Studis/seid-tasks/opencood/tools/train_ddp.py \
+	--hypes_yaml /home/nj644/dev/Studis/seid-tasks/opencood/hypes_yaml/truckscences_lidar_radar/pillarnet_radar_teacher.yaml
+```
+
+Example teacher run directory:
+
+```bash
+/home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_teacher_2026_05_01_16_35_17
+```
+
+Example checkpoint from that run:
+
+```bash
+/home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_teacher_2026_05_01_16_35_17/net_epoch18.pth
+```
+
+### 2. Distill Training
+
+Distill training freezes the teacher branch, runs the radar branch, and optimizes:
+
+- radar head loss
+- RadarDistill feature loss
+
+Relevant config values:
+
+- `train_stage: distill`
+- `freeze_teacher: true`
+- `teacher_ckpt: '.../net_epoch18.pth'`
+
+The current distill config already points to the latest validated teacher checkpoint example:
+
+```bash
+/home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_teacher_2026_05_01_16_35_17/net_epoch18.pth
+```
+
+Single-GPU command:
+
+```bash
+/home/nj644/dev/anaconda3/envs/bm2cp_v2/bin/python \
+	/home/nj644/dev/Studis/seid-tasks/opencood/tools/train.py \
+	--hypes_yaml /home/nj644/dev/Studis/seid-tasks/opencood/hypes_yaml/truckscences_lidar_radar/pillarnet_radar_distill.yaml
+```
+
+DDP example:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 \
+/home/nj644/dev/anaconda3/envs/bm2cp_v2/bin/python -m torch.distributed.launch \
+	--nproc_per_node=2 --use_env \
+	/home/nj644/dev/Studis/seid-tasks/opencood/tools/train_ddp.py \
+	--hypes_yaml /home/nj644/dev/Studis/seid-tasks/opencood/hypes_yaml/truckscences_lidar_radar/pillarnet_radar_distill.yaml
+```
+
+Validated smoke-test behavior with the epoch-18 teacher checkpoint:
+
+- distill forward succeeded on a real batch
+- `radar_head_loss` was finite
+- `distill_loss` was finite
+
+### 3. Joint Training
+
+Joint training keeps both the teacher and radar branches trainable and optimizes:
+
+- teacher head loss
+- radar head loss
+- RadarDistill feature loss
+
+Relevant config values:
+
+- `train_stage: joint`
+- `freeze_teacher: false`
+- `teacher_ckpt: '.../net_epoch18.pth'`
+
+Single-GPU command:
+
+```bash
+/home/nj644/dev/anaconda3/envs/bm2cp_v2/bin/python \
+	/home/nj644/dev/Studis/seid-tasks/opencood/tools/train.py \
+	--hypes_yaml /home/nj644/dev/Studis/seid-tasks/opencood/hypes_yaml/truckscences_lidar_radar/pillarnet_radar_joint.yaml
+```
+
+DDP example:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 \
+/home/nj644/dev/anaconda3/envs/bm2cp_v2/bin/python -m torch.distributed.launch \
+	--nproc_per_node=2 --use_env \
+	/home/nj644/dev/Studis/seid-tasks/opencood/tools/train_ddp.py \
+	--hypes_yaml /home/nj644/dev/Studis/seid-tasks/opencood/hypes_yaml/truckscences_lidar_radar/pillarnet_radar_joint.yaml
+```
+
+## Recommended Workflow
+
+### Teacher First
+
+1. Train the teacher config.
+2. Pick the checkpoint you want to use, for example `net_epoch18.pth`.
+3. Put that checkpoint path into:
+	 - `pillarnet_radar_distill.yaml`
+	 - `pillarnet_radar_joint.yaml`
+
+### Then Distill
+
+1. Run a one-batch smoke test if the model code changed.
+2. Start full distill training.
+3. Compare radar-only results against the original RadarDistill baseline.
+
+### Joint Is Optional
+
+Run joint only if you explicitly want to fine-tune teacher and student together after distillation.
+For most reproduction work, teacher then distill is the more important path.
+
+## Batch Size Notes
+
+The YAMLs may still contain larger batch sizes, but memory use should be treated conservatively.
+
+- Teacher training previously required reducing `batch_size` to `1` to avoid OOM on the tested GPU.
+- Distill and joint can be heavier than teacher.
+- If training crashes with CUDA OOM, reduce `train_params.batch_size` before retrying.
+
+Safe starting point:
+
+```yaml
+train_params:
+	batch_size: 1
+```
+
+## Resume Training
+
+To continue from an OpenCOOD training directory, use `--model_dir`.
+
+Example:
+
+```bash
+/home/nj644/dev/anaconda3/envs/bm2cp_v2/bin/python \
+	/home/nj644/dev/Studis/seid-tasks/opencood/tools/train.py \
+	--hypes_yaml /home/nj644/dev/Studis/seid-tasks/opencood/hypes_yaml/truckscences_lidar_radar/pillarnet_radar_distill.yaml \
+	--model_dir /home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_distill_YYYY_MM_DD_HH_MM_SS
+```
+
+## Evaluation
+
+Current OpenCOOD inference/eval commands use the integrated OpenCOOD AP evaluation path.
+
+Single-run inference example:
+
+```bash
+/home/nj644/dev/anaconda3/envs/bm2cp_v2/bin/python \
+	/home/nj644/dev/Studis/seid-tasks/opencood/tools/inference.py \
+	--model_dir /home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_teacher_2026_05_01_16_35_17 \
+	--fusion_method single \
+	--eval_epoch 18
+```
+
+Official TruckScenes evaluation is still a separate pending integration step.
+
+## Mapping To Original RadarDistill
+
+- `teacher` stage corresponds to the LiDAR teacher training path.
+- `distill` stage corresponds to the original RadarDistill training path where the teacher is frozen.
+- `joint` is an OpenCOOD-added stage for training teacher and radar branches together.
+- teacher-to-radar checkpoint cloning mirrors the idea of `ckpt.py`, but is done during model loading instead of by writing a separate rewritten checkpoint file.
+
+## Practical Checklist
+
+1. Build or confirm all required CUDA extensions and Python dependencies.
+2. Train the teacher model.
+3. Put the selected teacher checkpoint into the distill and joint YAMLs.
+4. Run a one-batch distill smoke test if code changed.
+5. Launch the full distill run.
+6. Evaluate the resulting checkpoint.
+7. Only then decide whether joint training is worth running.
 # RadarDistill Integration In OpenCOOD
 
 This note documents the RadarDistill port that was added to this OpenCOOD checkout, what is already working, and what is still not fully aligned with the original RadarDistill source code and paper.
