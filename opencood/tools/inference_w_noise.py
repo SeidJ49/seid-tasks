@@ -114,9 +114,9 @@ def main():
                                     drop_last=False)
             
             # Create the dictionary for evaluation
-            result_stat = {0.3: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
-                           0.5: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
-                           0.7: {'tp': [], 'fp': [], 'gt': 0, 'score': []}}
+            result_stat = eval_utils.init_result_stat()
+            class_names = hypes.get('model', {}).get('args', {}).get('class_names', [])
+            class_result_stat = {class_name: eval_utils.init_result_stat() for class_name in class_names}
             
             noise_level = f"{pos_std}_{rot_std}_{pos_mean}_{rot_mean}_" + opt.fusion_method + suffix + opt.note
 
@@ -160,6 +160,8 @@ def main():
                     pred_box_tensor = infer_result['pred_box_tensor']
                     gt_box_tensor = infer_result['gt_box_tensor']
                     pred_score = infer_result['pred_score']
+                    pred_label_tensor = infer_result.get('pred_label_tensor')
+                    gt_label_tensor = infer_result.get('gt_label_tensor')
 
                     eval_utils.caluclate_tp_fp(pred_box_tensor,
                                             pred_score,
@@ -176,6 +178,10 @@ def main():
                                             gt_box_tensor,
                                             result_stat,
                                             0.7)
+                    if class_result_stat:
+                        eval_utils.caluclate_tp_fp_multiclass(pred_box_tensor, pred_score, gt_box_tensor, pred_label_tensor, gt_label_tensor, class_result_stat, 0.3, class_names)
+                        eval_utils.caluclate_tp_fp_multiclass(pred_box_tensor, pred_score, gt_box_tensor, pred_label_tensor, gt_label_tensor, class_result_stat, 0.5, class_names)
+                        eval_utils.caluclate_tp_fp_multiclass(pred_box_tensor, pred_score, gt_box_tensor, pred_label_tensor, gt_label_tensor, class_result_stat, 0.7, class_names)
 
 
                     if (i % opt.save_vis_interval == 0) and (pred_box_tensor is not None) and (use_laplace is False):
@@ -206,6 +212,8 @@ def main():
 
             ap30, ap50, ap70 = eval_utils.eval_final_results(result_stat,
                                         opt.model_dir, noise_level)
+            if class_result_stat:
+                eval_utils.eval_final_results_multiclass(class_result_stat, opt.model_dir, noise_level)
             AP30.append(ap30)
             AP50.append(ap50)
             AP70.append(ap70)

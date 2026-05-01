@@ -115,7 +115,12 @@ def main():
     # optimizer setup
     optimizer = train_utils.setup_optimizer(hypes, model_without_ddp)
     
-    scheduler = train_utils.setup_lr_schedular(hypes, optimizer, init_epoch=init_epoch)
+    scheduler = train_utils.setup_lr_schedular(
+        hypes,
+        optimizer,
+        init_epoch=init_epoch,
+        steps_per_epoch=max(len(train_loader), 1),
+    )
 
     # record training
     writer = SummaryWriter(saved_path)
@@ -187,6 +192,7 @@ def main():
 
                     batch_data = train_utils.to_device(batch_data, device)
                     batch_data['ego']['epoch'] = epoch
+                    batch_data['ego']['compute_loss'] = True
                     ouput_dict = model(batch_data['ego'])
 
                     final_loss = criterion(ouput_dict,

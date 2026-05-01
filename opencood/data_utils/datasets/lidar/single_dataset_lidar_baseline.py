@@ -6,10 +6,12 @@ import numpy as np
 from pypcd import pypcd
 import torch
 from torch.utils.data import Dataset
+from opencood.data_utils.datasets.truckscenes_class_utils import attach_class_ids, build_class_id_lookup
 from opencood.utils.pcd_utils import shuffle_points, mask_ego_points, downsample_lidar_minimum
 from opencood.utils.transformation_utils import x1_to_x2
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.data_utils.post_processor import build_postprocessor
+from opencood.utils import box_utils
 from opencood.utils.pcd_utils import mask_points_by_range
 
 
@@ -37,6 +39,8 @@ class SingleDatasetLidarBaseline(Dataset):
 
         self.label_type = params['label_type']
         assert self.label_type in ['lidar']
+
+        self.class_names = params.get('model', {}).get('args', {}).get('class_names', [])
 
         self.generate_object_center = self.generate_object_center_lidar
         self.generate_object_center_single = self.generate_object_center
@@ -75,6 +79,7 @@ class SingleDatasetLidarBaseline(Dataset):
                 cav_entry['params'] = OrderedDict()
                 cav_entry['params']['vehicles'] = sample['labels']['gt_boxes_global']
                 cav_entry['params']['object_ids'] = sample['labels']['gt_object_ids'].tolist()
+                cav_entry['params']['gt_names'] = sample['labels']['gt_names'].tolist()
                 cav_entry['params']['ego_pose'] = sample['agents']['1']['ego_pose']['transform']
                 cav_entry['params']['lidar_top_front_pose'] = sample['agents']['1']['lidar_top_front_pose']['transform']
                 cav_entry['params']['ego_speed'] = sample['agents']['1']['ego_motion_cabin']
@@ -215,10 +220,21 @@ class SingleDatasetLidarBaseline(Dataset):
 
         ref_pose = self.get_ref_pose(selected_cav_base['params'])
         object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center_single([selected_cav_base], ref_pose)
+        class_id_lookup = build_class_id_lookup(
+            selected_cav_base['params']['gt_names'],
+            selected_cav_base['params']['object_ids'],
+            self.class_names,
+        )
+        object_bbx_center, object_bbx_mask, object_ids = attach_class_ids(
+            object_bbx_center,
+            object_bbx_mask,
+            object_ids,
+            class_id_lookup,
+        )
 
-        # No Cars
+        # No target classes in the scene.
         if len(object_ids) == 0:
-            print("No Cars in the scene")
+            print("No target classes in the scene")
             return None
 
         # --- LIDAR ----------------------------------------------------------------------------------------------------
@@ -243,7 +259,7 @@ class SingleDatasetLidarBaseline(Dataset):
             }
         )
 
-        label_dict = self.post_processor.generate_label(gt_box_center=object_bbx_center, anchors=self.anchor_box, mask=object_bbx_mask)
+        label_dict = self.post_processor.generate_label(gt_box_center=object_bbx_center[:, :7], anchors=self.anchor_box, mask=object_bbx_mask)
         selected_cav_processed.update({"label_dict": label_dict})
 
         return selected_cav_processed
@@ -346,12 +362,26 @@ class SingleDatasetLidarBaseline(Dataset):
 
 
     def post_process(self, data_dict, output_dict):
+        ego_output = output_dict.get('ego') if isinstance(output_dict, dict) else None
+        if isinstance(ego_output, dict) and 'final_box_dict' in ego_output:
+            gt_box_tensor, gt_label_tensor = self.post_processor.generate_gt_bbx_with_labels(data_dict)
+            final_dict = ego_output['final_box_dict'][0]
+            pred_box_tensor = box_utils.boxes_to_corners_3d(final_dict['pred_boxes'], order=self.post_processor.params['order'])
+            return pred_box_tensor, final_dict['pred_scores'], gt_box_tensor, final_dict.get('pred_labels'), gt_label_tensor
+
         pred_box_tensor, pred_score = self.post_processor.post_process(data_dict, output_dict)
         gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
 
         return pred_box_tensor, pred_score, gt_box_tensor
 
     def post_process_no_fusion(self, data_dict, output_dict_ego):
+        ego_output = output_dict_ego.get('ego') if isinstance(output_dict_ego, dict) else None
+        if isinstance(ego_output, dict) and 'final_box_dict' in ego_output:
+            gt_box_tensor, gt_label_tensor = self.post_processor.generate_gt_bbx_with_labels(data_dict)
+            final_dict = ego_output['final_box_dict'][0]
+            pred_box_tensor = box_utils.boxes_to_corners_3d(final_dict['pred_boxes'], order=self.post_processor.params['order'])
+            return pred_box_tensor, final_dict['pred_scores'], gt_box_tensor, final_dict.get('pred_labels'), gt_label_tensor
+
         data_dict_ego = OrderedDict()
         data_dict_ego["ego"] = data_dict["ego"]
         gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
@@ -360,6 +390,13 @@ class SingleDatasetLidarBaseline(Dataset):
         return pred_box_tensor, pred_score, gt_box_tensor
 
     def post_process_no_fusion_uncertainty(self, data_dict, output_dict_ego):
+        ego_output = output_dict_ego.get('ego') if isinstance(output_dict_ego, dict) else None
+        if isinstance(ego_output, dict) and 'final_box_dict' in ego_output:
+            gt_box_tensor, gt_label_tensor = self.post_processor.generate_gt_bbx_with_labels(data_dict)
+            final_dict = ego_output['final_box_dict'][0]
+            pred_box_tensor = box_utils.boxes_to_corners_3d(final_dict['pred_boxes'], order=self.post_processor.params['order'])
+            return pred_box_tensor, final_dict['pred_scores'], gt_box_tensor, final_dict.get('pred_labels'), gt_label_tensor, None
+
         data_dict_ego = OrderedDict()
         data_dict_ego['ego'] = data_dict['ego']
         gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)

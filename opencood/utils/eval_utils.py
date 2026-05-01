@@ -119,6 +119,9 @@ def calculate_ap(result_stat, iou):
 
     gt_total = iou_5['gt']
 
+    if gt_total == 0:
+        return 0.0, [0.0, 1.0], [0.0, 0.0]
+
     cumsum = 0
     for idx, val in enumerate(fp):
         fp[idx] += cumsum
@@ -167,3 +170,54 @@ def eval_final_results(result_stat, save_path, infer_info=None):
           'The Average Precision at IOU 0.7 is %.2f' % (ap_30, ap_50, ap_70))
 
     return ap_30, ap_50, ap_70
+
+
+def init_result_stat():
+    return {0.3: {'tp': [], 'fp': [], 'gt': 0, 'score': []},
+            0.5: {'tp': [], 'fp': [], 'gt': 0, 'score': []},
+            0.7: {'tp': [], 'fp': [], 'gt': 0, 'score': []}}
+
+
+def caluclate_tp_fp_multiclass(det_boxes, det_score, gt_boxes, det_labels, gt_labels, class_result_stat, iou_thresh, class_names):
+    if det_labels is None or gt_labels is None:
+        return
+
+    for class_id, class_name in enumerate(class_names, start=1):
+        cur_det_boxes = None
+        cur_det_score = None
+        if det_boxes is not None and det_labels is not None:
+            det_mask = det_labels == class_id
+            if det_mask.any():
+                cur_det_boxes = det_boxes[det_mask]
+                cur_det_score = det_score[det_mask]
+
+        gt_mask = gt_labels == class_id
+        cur_gt_boxes = gt_boxes[gt_mask]
+        caluclate_tp_fp(cur_det_boxes, cur_det_score, cur_gt_boxes, class_result_stat[class_name], iou_thresh)
+
+
+def eval_final_results_multiclass(class_result_stat, save_path, infer_info=None):
+    dump_dict = {}
+    ap50_values = []
+    ap70_values = []
+
+    for class_name, result_stat in class_result_stat.items():
+        ap_30, ap_50, ap_70 = calculate_ap(result_stat, 0.30), calculate_ap(result_stat, 0.50), calculate_ap(result_stat, 0.70)
+        gt_count = result_stat[0.5]['gt']
+        dump_dict[class_name] = {
+            'ap30': ap_30[0],
+            'ap50': ap_50[0],
+            'ap70': ap_70[0],
+            'gt': gt_count,
+        }
+        if gt_count > 0:
+            ap50_values.append(ap_50[0])
+            ap70_values.append(ap_70[0])
+
+    if ap50_values:
+        dump_dict['mean_ap50'] = float(np.mean(ap50_values))
+        dump_dict['mean_ap70'] = float(np.mean(ap70_values))
+
+    filename = 'eval_per_class.yaml' if infer_info is None else f'eval_per_class_{infer_info}.yaml'
+    yaml_utils.save_yaml(dump_dict, os.path.join(save_path, filename))
+    return dump_dict

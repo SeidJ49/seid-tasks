@@ -22,6 +22,8 @@ class PointPillarRadarDistill(nn.Module):
         self.distill_loss_weight = args.get('distill_loss_weight', 1.0)
         self.teacher_loss_weight = args.get('teacher_loss_weight', 1.0)
         self.teacher_ckpt = args.get('teacher_ckpt', '')
+        if self.train_stage not in {'teacher', 'distill', 'joint'}:
+            raise ValueError(f"Unsupported train_stage '{self.train_stage}'")
 
         self.lidar_vfe = DynamicPillarVFESimple2D(
             args['lidar_vfe'],
@@ -58,6 +60,8 @@ class PointPillarRadarDistill(nn.Module):
         )
         if self.teacher_ckpt:
             self._load_teacher_checkpoint(self.teacher_ckpt)
+        if self.freeze_teacher and self.train_stage != 'teacher':
+            self._freeze_teacher_modules()
 
     def _load_teacher_checkpoint(self, ckpt_path):
         state_dict = torch.load(ckpt_path, map_location='cpu')
@@ -74,12 +78,28 @@ class PointPillarRadarDistill(nn.Module):
 
         self.load_state_dict(filtered_state, strict=False)
 
+    def _freeze_teacher_modules(self):
+        for module in (self.lidar_vfe, self.teacher_backbone, self.teacher_bev_backbone, self.teacher_head):
+            module.requires_grad_(False)
+            module.eval()
+
+    def train(self, mode=True):
+        super().train(mode)
+        if self.freeze_teacher and self.train_stage != 'teacher':
+            for module in (self.lidar_vfe, self.teacher_backbone, self.teacher_bev_backbone, self.teacher_head):
+                module.eval()
+        return self
+
     @staticmethod
     def _masked_gt_boxes(object_bbx_center, object_bbx_mask):
+        if object_bbx_center.shape[-1] == 8:
+            gt_boxes = object_bbx_center.float().clone()
+            gt_boxes[:, :, 7] = gt_boxes[:, :, 7] * object_bbx_mask.float()
+            return gt_boxes
+
         gt_boxes = object_bbx_center.new_zeros(object_bbx_center.shape[0], object_bbx_center.shape[1], 8)
         gt_boxes[:, :, :7] = object_bbx_center.float()
         gt_boxes[:, :, 7] = object_bbx_mask.float()
-        gt_boxes[:, :, 7][object_bbx_mask > 0] = 1.0
         return gt_boxes
 
     def _run_teacher(self, batch_dict):
@@ -96,23 +116,39 @@ class PointPillarRadarDistill(nn.Module):
         return batch_dict
 
     def _teacher_forward(self, batch_dict):
+        if self.freeze_teacher and self.train_stage != 'teacher':
+            with torch.no_grad():
+                batch_dict = self._run_teacher(batch_dict)
+                batch_dict = self.teacher_head(batch_dict)
+            return batch_dict
+
         batch_dict = self._run_teacher(batch_dict)
         batch_dict = self.teacher_head(batch_dict)
         return batch_dict
 
+    @staticmethod
+    def _select_final_box_dict(batch_dict):
+        if 'final_box_dict' in batch_dict:
+            return batch_dict['final_box_dict']
+        if 'lidar_final_box_dict' in batch_dict:
+            return batch_dict['lidar_final_box_dict']
+        return []
+
     def forward(self, data_dict):
         batch_size = int(data_dict['object_bbx_center'].shape[0])
+        compute_loss = bool(data_dict.get('compute_loss', False))
         batch_dict = {
             'batch_size': batch_size,
             'points': data_dict['lidar_points'],
             'radar_points': data_dict['radar_points'],
             'gt_boxes': self._masked_gt_boxes(data_dict['object_bbx_center'], data_dict['object_bbx_mask']),
+            'compute_loss': compute_loss,
         }
 
         batch_dict = self._teacher_forward(batch_dict)
 
         if self.train_stage == 'teacher':
-            if self.training:
+            if self.training or compute_loss:
                 teacher_head_loss, teacher_tb = self.teacher_head.get_loss()
                 total_loss = self.teacher_loss_weight * teacher_head_loss
                 tb_dict = {'total_loss': total_loss.item(), 'teacher_head_loss': teacher_head_loss.item(), **teacher_tb}
@@ -120,26 +156,41 @@ class PointPillarRadarDistill(nn.Module):
                     'loss': total_loss,
                     'tb_dict': tb_dict,
                     'teacher_head_loss': teacher_head_loss,
-                    'final_box_dict': batch_dict.get('lidar_final_box_dict', []),
+                    'final_box_dict': self._select_final_box_dict(batch_dict),
                 }
-            return {'final_box_dict': batch_dict.get('lidar_final_box_dict', [])}
+            return {'final_box_dict': self._select_final_box_dict(batch_dict)}
 
         batch_dict = self.radar_vfe(batch_dict)
         batch_dict = self.radar_backbone(batch_dict)
         batch_dict = self.radar_distill(batch_dict)
         batch_dict = self.radar_head(batch_dict)
 
-        if self.training:
+        if self.training or compute_loss:
+            teacher_head_loss = None
+            teacher_tb = {}
+            if self.train_stage == 'joint':
+                teacher_head_loss, teacher_tb = self.teacher_head.get_loss()
+
             radar_head_loss, radar_tb = self.radar_head.get_loss()
             distill_loss, distill_tb = self.radar_distill.get_loss(batch_dict)
             total_loss = self.radar_loss_weight * radar_head_loss + self.distill_loss_weight * distill_loss
             tb_dict = {'total_loss': total_loss.item(), **radar_tb, **distill_tb}
-            return {
+            output_dict = {
                 'loss': total_loss,
                 'tb_dict': tb_dict,
                 'radar_head_loss': radar_head_loss,
                 'distill_loss': distill_loss,
-                'final_box_dict': batch_dict.get('final_box_dict', []),
+                'final_box_dict': self._select_final_box_dict(batch_dict),
             }
 
-        return {'final_box_dict': batch_dict.get('final_box_dict', [])}
+            if teacher_head_loss is not None:
+                total_loss = total_loss + self.teacher_loss_weight * teacher_head_loss
+                tb_dict['total_loss'] = total_loss.item()
+                tb_dict.update({f'teacher_{k}': v for k, v in teacher_tb.items()})
+                tb_dict['teacher_head_loss'] = teacher_head_loss.item()
+                output_dict['loss'] = total_loss
+                output_dict['teacher_head_loss'] = teacher_head_loss
+
+            return output_dict
+
+        return {'final_box_dict': self._select_final_box_dict(batch_dict)}

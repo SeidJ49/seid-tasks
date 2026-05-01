@@ -87,6 +87,195 @@ def _topk(scores, topk=40):
     return topk_score, topk_inds, topk_classes, topk_ys, topk_xs
 
 
+def class_agnostic_nms(box_scores, box_preds, nms_config, score_thresh=None):
+    src_box_scores = box_scores
+    if score_thresh is not None:
+        scores_mask = box_scores >= score_thresh
+        box_scores = box_scores[scores_mask]
+        box_preds = box_preds[scores_mask]
+
+    selected = box_scores.new_zeros((0,), dtype=torch.long)
+    if box_scores.shape[0] > 0:
+        box_scores_nms, indices = torch.topk(
+            box_scores, k=min(nms_config['nms_pre_maxsize'], box_scores.shape[0])
+        )
+        boxes_for_nms = box_preds[indices]
+        keep_idx, _ = nms_gpu(
+            boxes_for_nms[:, 0:7],
+            box_scores_nms,
+            nms_config['nms_thresh'],
+            pre_maxsize=nms_config['nms_pre_maxsize'],
+        )
+        selected = indices[keep_idx[:nms_config['nms_post_maxsize']]]
+
+    if score_thresh is not None:
+        original_idxs = scores_mask.nonzero(as_tuple=False).view(-1)
+        selected = original_idxs[selected]
+
+    return selected, src_box_scores[selected]
+
+
+def decode_bbox_from_heatmap(
+    heatmap,
+    rot_cos,
+    rot_sin,
+    center,
+    center_z,
+    dim,
+    iou=None,
+    rectifier=0.0,
+    point_cloud_range=None,
+    voxel_size=None,
+    feature_map_stride=None,
+    vel=None,
+    topk=100,
+    score_thresh=None,
+    post_center_limit_range=None,
+):
+    batch_size, _, _, _ = heatmap.size()
+    scores, inds, class_ids, ys, xs = _topk(heatmap, topk=topk)
+    center = _transpose_and_gather_feat(center, inds).view(batch_size, topk, 2)
+    rot_sin = _transpose_and_gather_feat(rot_sin, inds).view(batch_size, topk, 1)
+    rot_cos = _transpose_and_gather_feat(rot_cos, inds).view(batch_size, topk, 1)
+    center_z = _transpose_and_gather_feat(center_z, inds).view(batch_size, topk, 1)
+    dim = _transpose_and_gather_feat(dim, inds).view(batch_size, topk, 3)
+    if iou is not None:
+        iou = _transpose_and_gather_feat(iou, inds).view(batch_size, topk, 1)
+
+    angle = torch.atan2(rot_sin, rot_cos)
+    xs = xs.view(batch_size, topk, 1) + center[:, :, 0:1]
+    ys = ys.view(batch_size, topk, 1) + center[:, :, 1:2]
+    xs = xs * feature_map_stride * voxel_size[0] + point_cloud_range[0]
+    ys = ys * feature_map_stride * voxel_size[1] + point_cloud_range[1]
+
+    box_parts = [xs, ys, center_z, dim, angle]
+    if vel is not None:
+        vel = _transpose_and_gather_feat(vel, inds).view(batch_size, topk, 2)
+        box_parts.append(vel)
+
+    final_box_preds = torch.cat(box_parts, dim=-1)
+    final_scores = scores.view(batch_size, topk)
+    final_class_ids = class_ids.view(batch_size, topk)
+
+    assert post_center_limit_range is not None
+    mask = (final_box_preds[..., :3] >= post_center_limit_range[:3]).all(dim=2)
+    mask &= (final_box_preds[..., :3] <= post_center_limit_range[3:]).all(dim=2)
+    if score_thresh is not None:
+        mask &= final_scores > score_thresh
+
+    pred_dicts = []
+    for batch_index in range(batch_size):
+        cur_mask = mask[batch_index]
+        cur_boxes = final_box_preds[batch_index, cur_mask]
+        cur_scores = final_scores[batch_index, cur_mask]
+        cur_labels = final_class_ids[batch_index, cur_mask]
+        if iou is not None:
+            cur_iou = torch.clamp(iou[batch_index, cur_mask].view(-1), min=0.0, max=1.0)
+            cur_scores = torch.pow(cur_scores, 1 - rectifier) * torch.pow(cur_iou, rectifier)
+        pred_dicts.append({
+            'pred_boxes': cur_boxes,
+            'pred_scores': cur_scores,
+            'pred_labels': cur_labels,
+        })
+
+    return pred_dicts
+
+
+def center_to_corner2d(center, dim):
+    corners_norm = torch.tensor(
+        [[-0.5, -0.5], [-0.5, 0.5], [0.5, 0.5], [0.5, -0.5]],
+        dtype=torch.float32,
+        device=dim.device,
+    )
+    corners = dim.view(-1, 1, 2) * corners_norm.view(1, 4, 2)
+    return corners + center.view(-1, 1, 2)
+
+
+def bbox3d_overlaps_diou(pred_boxes, gt_boxes):
+    assert pred_boxes.shape[0] == gt_boxes.shape[0]
+
+    pred_corners = center_to_corner2d(pred_boxes[:, :2], pred_boxes[:, 3:5])
+    gt_corners = center_to_corner2d(gt_boxes[:, :2], gt_boxes[:, 3:5])
+
+    inter_max_xy = torch.minimum(pred_corners[:, 2], gt_corners[:, 2])
+    inter_min_xy = torch.maximum(pred_corners[:, 0], gt_corners[:, 0])
+    out_max_xy = torch.maximum(pred_corners[:, 2], gt_corners[:, 2])
+    out_min_xy = torch.minimum(pred_corners[:, 0], gt_corners[:, 0])
+
+    volume_pred = pred_boxes[:, 3] * pred_boxes[:, 4] * pred_boxes[:, 5]
+    volume_gt = gt_boxes[:, 3] * gt_boxes[:, 4] * gt_boxes[:, 5]
+
+    inter_h = torch.minimum(
+        pred_boxes[:, 2] + 0.5 * pred_boxes[:, 5],
+        gt_boxes[:, 2] + 0.5 * gt_boxes[:, 5],
+    ) - torch.maximum(
+        pred_boxes[:, 2] - 0.5 * pred_boxes[:, 5],
+        gt_boxes[:, 2] - 0.5 * gt_boxes[:, 5],
+    )
+    inter_h = torch.clamp(inter_h, min=0)
+
+    inter = torch.clamp(inter_max_xy - inter_min_xy, min=0)
+    volume_inter = inter[:, 0] * inter[:, 1] * inter_h
+    volume_union = volume_gt + volume_pred - volume_inter
+
+    inter_diag = torch.pow(gt_boxes[:, 0:3] - pred_boxes[:, 0:3], 2).sum(dim=-1)
+    outer_h = torch.maximum(
+        gt_boxes[:, 2] + 0.5 * gt_boxes[:, 5],
+        pred_boxes[:, 2] + 0.5 * pred_boxes[:, 5],
+    ) - torch.minimum(
+        gt_boxes[:, 2] - 0.5 * gt_boxes[:, 5],
+        pred_boxes[:, 2] - 0.5 * pred_boxes[:, 5],
+    )
+    outer_h = torch.clamp(outer_h, min=0)
+    outer = torch.clamp(out_max_xy - out_min_xy, min=0)
+    outer_diag = outer[:, 0] ** 2 + outer[:, 1] ** 2 + outer_h ** 2
+
+    dious = volume_inter / volume_union - inter_diag / outer_diag
+    return torch.clamp(dious, min=-1.0, max=1.0)
+
+
+def bbox3d_overlaps_giou(pred_boxes, gt_boxes):
+    assert pred_boxes.shape[0] == gt_boxes.shape[0]
+
+    pred_corners = center_to_corner2d(pred_boxes[:, :2], pred_boxes[:, 3:5])
+    gt_corners = center_to_corner2d(gt_boxes[:, :2], gt_boxes[:, 3:5])
+
+    inter_max_xy = torch.minimum(pred_corners[:, 2], gt_corners[:, 2])
+    inter_min_xy = torch.maximum(pred_corners[:, 0], gt_corners[:, 0])
+    out_max_xy = torch.maximum(pred_corners[:, 2], gt_corners[:, 2])
+    out_min_xy = torch.minimum(pred_corners[:, 0], gt_corners[:, 0])
+
+    volume_pred = pred_boxes[:, 3] * pred_boxes[:, 4] * pred_boxes[:, 5]
+    volume_gt = gt_boxes[:, 3] * gt_boxes[:, 4] * gt_boxes[:, 5]
+
+    inter_h = torch.minimum(
+        gt_boxes[:, 2] + 0.5 * gt_boxes[:, 5],
+        pred_boxes[:, 2] + 0.5 * pred_boxes[:, 5],
+    ) - torch.maximum(
+        gt_boxes[:, 2] - 0.5 * gt_boxes[:, 5],
+        pred_boxes[:, 2] - 0.5 * pred_boxes[:, 5],
+    )
+    inter_h = torch.clamp(inter_h, min=0)
+
+    inter = torch.clamp(inter_max_xy - inter_min_xy, min=0)
+    volume_inter = inter[:, 0] * inter[:, 1] * inter_h
+    volume_union = volume_gt + volume_pred - volume_inter
+
+    outer_h = torch.maximum(
+        gt_boxes[:, 2] + 0.5 * gt_boxes[:, 5],
+        pred_boxes[:, 2] + 0.5 * pred_boxes[:, 5],
+    ) - torch.minimum(
+        gt_boxes[:, 2] - 0.5 * gt_boxes[:, 5],
+        pred_boxes[:, 2] - 0.5 * pred_boxes[:, 5],
+    )
+    outer_h = torch.clamp(outer_h, min=0)
+    outer = torch.clamp(out_max_xy - out_min_xy, min=0)
+    closure = outer[:, 0] * outer[:, 1] * outer_h
+
+    gious = volume_inter / volume_union - (closure - volume_union) / closure
+    return torch.clamp(gious, min=-1.0, max=1.0)
+
+
 class FocalLossCenterNet(nn.Module):
     def forward(self, pred, gt):
         pos_inds = gt.eq(1).float()
@@ -137,6 +326,26 @@ class IouLossCenterNet(nn.Module):
         pred_selected_iou = pred_iou[valid_mask][finite_mask]
         iou_targets = 2 * iou_targets - 1
         return F.l1_loss(pred_selected_iou, iou_targets, reduction='mean')
+
+
+class IouRegLossCenterNet(nn.Module):
+    def __init__(self, iou_type='DIoU'):
+        super().__init__()
+        if iou_type == 'DIoU':
+            self.bbox3d_iou_func = bbox3d_overlaps_diou
+        elif iou_type == 'GIoU':
+            self.bbox3d_iou_func = bbox3d_overlaps_giou
+        else:
+            raise NotImplementedError(f'Unsupported IoU regression type: {iou_type}')
+
+    def forward(self, pred_boxes, mask, ind, gt_boxes):
+        valid_mask = mask.bool()
+        if valid_mask.sum() == 0:
+            return pred_boxes.new_tensor(0.0)
+
+        pred_boxes = _gather_feat(pred_boxes, ind)
+        iou = self.bbox3d_iou_func(pred_boxes[valid_mask], gt_boxes[valid_mask][:, :7])
+        return (1.0 - iou).sum() / (valid_mask.sum() + 1e-4)
 
 
 class SeparateHead(nn.Module):
@@ -192,15 +401,34 @@ class RadarCenterHead(nn.Module):
         self.target_dicts_key = target_dicts_key
         self.final_box_dict_key = final_box_dict_key
         self.feature_map_stride = model_cfg['target_assigner_config']['feature_map_stride']
+        self.predict_boxes_when_training = model_cfg.get('predict_boxes_when_training', True)
+        self.rectifier = model_cfg.get('rectifier', 0.0)
+        self.use_bias_before_norm = model_cfg.get('use_bias_before_norm', False)
+        self.with_iou = 'iou' in model_cfg['separate_head_cfg']['head_dict']
+        self.with_iou_reg = model_cfg.get('iou_reg', False)
 
         self.class_names_each_head = model_cfg['class_names_each_head']
         self.class_id_mapping_each_head = []
+        total_classes = 0
+        filtered_class_names_each_head = []
         for head_classes in self.class_names_each_head:
-            mapping = [self.class_names.index(name) for name in head_classes if name in self.class_names]
+            filtered_head_classes = [name for name in head_classes if name in self.class_names]
+            filtered_class_names_each_head.append(filtered_head_classes)
+            total_classes += len(filtered_head_classes)
+            mapping = [self.class_names.index(name) for name in filtered_head_classes]
             self.class_id_mapping_each_head.append(torch.tensor(mapping, dtype=torch.long))
+        self.class_names_each_head = filtered_class_names_each_head
+        assert total_classes == len(self.class_names), f'class_names_each_head={self.class_names_each_head}'
 
         self.shared_conv = nn.Sequential(
-            nn.Conv2d(input_channels, model_cfg['shared_conv_channel'], 3, stride=1, padding=1, bias=False),
+            nn.Conv2d(
+                input_channels,
+                model_cfg['shared_conv_channel'],
+                3,
+                stride=1,
+                padding=1,
+                bias=self.use_bias_before_norm,
+            ),
             nn.BatchNorm2d(model_cfg['shared_conv_channel']),
             nn.ReLU(),
         )
@@ -215,19 +443,21 @@ class RadarCenterHead(nn.Module):
                     input_channels=model_cfg['shared_conv_channel'],
                     sep_head_dict=cur_head_dict,
                     init_bias=-2.19,
+                    use_bias=self.use_bias_before_norm,
                 )
             )
 
         self.hm_loss_func = FocalLossCenterNet()
         self.reg_loss_func = RegLossCenterNet()
-        self.iou_loss_func = IouLossCenterNet() if 'iou' in self.separate_head_cfg['head_dict'] else None
+        self.iou_loss_func = IouLossCenterNet() if self.with_iou else None
+        self.iou_reg_loss_func = IouRegLossCenterNet(self.with_iou_reg) if self.with_iou_reg else None
         self.forward_ret_dict = {}
 
     def assign_target_of_single_head(self, num_classes, gt_boxes, feature_map_size):
         target_cfg = self.model_cfg['target_assigner_config']
         heatmap = gt_boxes.new_zeros(num_classes, feature_map_size[1], feature_map_size[0])
         reg_dim = sum(self.separate_head_cfg['head_dict'][name]['out_channels'] for name in self.separate_head_cfg['head_order'] if name != 'iou')
-        ret_boxes = gt_boxes.new_full((target_cfg['num_max_objs'], reg_dim), float('nan'))
+        ret_boxes = gt_boxes.new_zeros((target_cfg['num_max_objs'], reg_dim))
         gt_box = gt_boxes.new_zeros((target_cfg['num_max_objs'], 7))
         inds = gt_boxes.new_zeros(target_cfg['num_max_objs']).long()
         mask = gt_boxes.new_zeros(target_cfg['num_max_objs']).long()
@@ -309,7 +539,6 @@ class RadarCenterHead(nn.Module):
         pred_dicts = self.forward_ret_dict['pred_dicts']
         target_dicts = self.forward_ret_dict['target_dicts']
         code_weights = pred_dicts[0]['center'].new_tensor(self.model_cfg['loss_config']['loss_weights']['code_weights'])
-        rectifier = self.model_cfg.get('rectifier', 0.0)
 
         total_loss = 0
         tb_dict = {}
@@ -326,20 +555,38 @@ class RadarCenterHead(nn.Module):
             tb_dict[f'hm_loss_head_{index}'] = hm_loss.item()
             tb_dict[f'loc_loss_head_{index}'] = loc_loss.item()
 
-            if self.iou_loss_func is not None and 'iou' in pred_dict:
-                gathered = self._build_dense_box_predictions(pred_dict)
-                iou_loss = self.iou_loss_func(pred_dict['iou'], target_dicts['masks'][index], target_dicts['inds'][index], gathered, target_dicts['gt_box'][index])
-                iou_weight = self.model_cfg['loss_config']['loss_weights'].get('iou_weight', 1.0)
-                total_loss += iou_weight * iou_loss
-                tb_dict[f'iou_loss_head_{index}'] = iou_loss.item()
+            if self.iou_loss_func is not None or self.iou_reg_loss_func is not None:
+                dense_boxes = self._build_dense_box_predictions(pred_dict)
+                if self.iou_loss_func is not None and 'iou' in pred_dict:
+                    iou_loss = self.iou_loss_func(
+                        pred_dict['iou'],
+                        target_dicts['masks'][index],
+                        target_dicts['inds'][index],
+                        dense_boxes.detach(),
+                        target_dicts['gt_box'][index],
+                    )
+                    iou_weight = self.model_cfg['loss_config']['loss_weights'].get('iou_weight', 1.0)
+                    total_loss += iou_weight * iou_loss
+                    tb_dict[f'iou_loss_head_{index}'] = iou_loss.item()
 
-        tb_dict['radar_head_loss'] = total_loss.item()
+                if self.iou_reg_loss_func is not None:
+                    iou_reg_loss = self.iou_reg_loss_func(
+                        dense_boxes,
+                        target_dicts['masks'][index],
+                        target_dicts['inds'][index],
+                        target_dicts['gt_box'][index],
+                    )
+                    loc_weight = self.model_cfg['loss_config']['loss_weights'].get('loc_weight', 1.0)
+                    total_loss += loc_weight * iou_reg_loss
+                    tb_dict[f'iou_reg_loss_head_{index}'] = iou_reg_loss.item()
+
+        tb_dict['rpn_loss'] = total_loss.item()
         return total_loss, tb_dict
 
     def _build_dense_box_predictions(self, pred_dict):
         batch_center = pred_dict['center'].permute(0, 2, 3, 1).contiguous()
         batch_center_z = pred_dict['center_z'].permute(0, 2, 3, 1).contiguous()
-        batch_dim = pred_dict['dim'].exp().permute(0, 2, 3, 1).contiguous()
+        batch_dim = torch.exp(torch.clamp(pred_dict['dim'], min=-5, max=5)).permute(0, 2, 3, 1).contiguous()
         batch_rot = pred_dict['rot'].permute(0, 2, 3, 1).contiguous()
         batch_rot = torch.atan2(batch_rot[..., 1:2], batch_rot[..., 0:1])
 
@@ -359,50 +606,48 @@ class RadarCenterHead(nn.Module):
 
     def generate_predicted_boxes(self, batch_size, pred_dicts):
         post_cfg = self.model_cfg['post_processing']
-        rectifier = self.model_cfg.get('rectifier', 0.0)
         post_center_limit_range = torch.tensor(post_cfg['post_center_limit_range'], device=pred_dicts[0]['hm'].device).float()
         results = [{'pred_boxes': [], 'pred_scores': [], 'pred_labels': []} for _ in range(batch_size)]
 
         for head_index, pred_dict in enumerate(pred_dicts):
-            heatmap = pred_dict['hm'].sigmoid()
-            scores, inds, class_ids, ys, xs = _topk(heatmap, topk=post_cfg['max_obj_per_sample'])
-            center = _transpose_and_gather_feat(pred_dict['center'], inds).view(batch_size, -1, 2)
-            center_z = _transpose_and_gather_feat(pred_dict['center_z'], inds).view(batch_size, -1, 1)
-            dim = _transpose_and_gather_feat(pred_dict['dim'].exp(), inds).view(batch_size, -1, 3)
-            rot = _transpose_and_gather_feat(pred_dict['rot'], inds).view(batch_size, -1, 2)
-            iou = _transpose_and_gather_feat(pred_dict['iou'], inds).view(batch_size, -1, 1) if 'iou' in pred_dict else None
-            angle = torch.atan2(rot[:, :, 1:2], rot[:, :, 0:1])
-            xs = xs.view(batch_size, -1, 1) + center[:, :, 0:1]
-            ys = ys.view(batch_size, -1, 1) + center[:, :, 1:2]
-            xs = xs * self.feature_map_stride * self.voxel_size[0] + self.point_cloud_range[0]
-            ys = ys * self.feature_map_stride * self.voxel_size[1] + self.point_cloud_range[1]
-            final_boxes = torch.cat([xs, ys, center_z, dim, angle], dim=-1)
-            final_scores = scores.view(batch_size, -1)
-            final_labels = class_ids.view(batch_size, -1)
+            class_mapping = self.class_id_mapping_each_head[head_index].to(pred_dict['hm'].device)
+            batch_iou = None
+            if 'iou' in pred_dict:
+                batch_iou = (pred_dict['iou'] + 1.0) * 0.5
+                batch_iou = batch_iou.type_as(pred_dict['dim'])
 
-            mask = (final_boxes[..., :3] >= post_center_limit_range[:3]).all(dim=2)
-            mask &= (final_boxes[..., :3] <= post_center_limit_range[3:]).all(dim=2)
-            mask &= final_scores > post_cfg['score_thresh']
+            final_pred_dicts = decode_bbox_from_heatmap(
+                heatmap=pred_dict['hm'].sigmoid(),
+                rot_cos=pred_dict['rot'][:, 0].unsqueeze(1),
+                rot_sin=pred_dict['rot'][:, 1].unsqueeze(1),
+                center=pred_dict['center'],
+                center_z=pred_dict['center_z'],
+                dim=pred_dict['dim'].exp(),
+                vel=pred_dict['vel'] if 'vel' in self.separate_head_cfg['head_order'] else None,
+                iou=batch_iou,
+                rectifier=self.rectifier,
+                point_cloud_range=self.point_cloud_range,
+                voxel_size=self.voxel_size,
+                feature_map_stride=self.feature_map_stride,
+                topk=post_cfg['max_obj_per_sample'],
+                score_thresh=post_cfg['score_thresh'],
+                post_center_limit_range=post_center_limit_range,
+            )
 
-            class_mapping = self.class_id_mapping_each_head[head_index].to(final_labels.device)
             for batch_index in range(batch_size):
-                cur_mask = mask[batch_index]
-                cur_boxes = final_boxes[batch_index, cur_mask]
-                cur_scores = final_scores[batch_index, cur_mask]
-                cur_labels = final_labels[batch_index, cur_mask]
-                if iou is not None:
-                    cur_iou = torch.clamp((iou[batch_index, cur_mask].view(-1) + 1) * 0.5, min=0.0, max=1.0)
-                    cur_scores = torch.pow(cur_scores, 1 - rectifier) * torch.pow(cur_iou, rectifier)
+                cur_pred_dict = final_pred_dicts[batch_index]
+                cur_boxes = cur_pred_dict['pred_boxes']
+                cur_scores = cur_pred_dict['pred_scores']
+                cur_labels = cur_pred_dict['pred_labels'].long()
                 if cur_boxes.shape[0] > 0:
-                    selected, _ = nms_gpu(
-                        cur_boxes,
-                        cur_scores,
-                        post_cfg['nms_config']['nms_thresh'],
-                        pre_maxsize=post_cfg['nms_config']['nms_pre_maxsize'],
+                    selected, selected_scores = class_agnostic_nms(
+                        box_scores=cur_scores,
+                        box_preds=cur_boxes,
+                        nms_config=post_cfg['nms_config'],
+                        score_thresh=None,
                     )
-                    selected = selected[:post_cfg['nms_config']['nms_post_maxsize']]
                     cur_boxes = cur_boxes[selected]
-                    cur_scores = cur_scores[selected]
+                    cur_scores = selected_scores
                     cur_labels = cur_labels[selected]
 
                 results[batch_index]['pred_boxes'].append(cur_boxes)
@@ -427,12 +672,12 @@ class RadarCenterHead(nn.Module):
         pred_dicts = [head(shared_features) for head in self.heads_list]
         batch_dict[self.pred_dicts_key] = pred_dicts
 
-        if self.training:
+        if self.training or batch_dict.get('compute_loss', False):
             target_dicts = self.assign_targets(batch_dict['gt_boxes'], feature_map_size=spatial_features_2d.size()[2:])
             batch_dict[self.target_dicts_key] = target_dicts
             self.forward_ret_dict = {'pred_dicts': pred_dicts, 'target_dicts': target_dicts}
 
-        if (not self.training) or self.model_cfg.get('predict_boxes_when_training', True):
+        if (not self.training) or self.predict_boxes_when_training:
             batch_dict[self.final_box_dict_key] = self.generate_predicted_boxes(batch_dict['batch_size'], pred_dicts)
         return batch_dict
 

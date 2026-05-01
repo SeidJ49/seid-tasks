@@ -1,8 +1,8 @@
 name: point_pillar_radar_teacher
 
-root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
-validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
-test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
+root_dir: "/home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/DatasetTruckscences_mini/trainval/train.pkl"
+validate_dir: "/home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/DatasetTruckscences_mini/trainval/val.pkl"
+test_dir: "/home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/DatasetTruckscences_mini/trainval/test.pkl"
 
 ref_frame: 'ego_pose'
 

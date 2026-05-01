@@ -33,6 +33,7 @@ def test_parser():
     parser.add_argument('--no_score', action='store_true',
                         help="whether print the score of prediction")
     parser.add_argument('--note', default="", type=str, help="any other thing?")
+    parser.add_argument('--eval_epoch', type=int, default=None, help="which epoch to evaluate, default is the one in model_dir")
     opt = parser.parse_args()
     return opt
 
@@ -91,7 +92,7 @@ def main():
 
     print('Loading Model from checkpoint')
     saved_path = opt.model_dir
-    resume_epoch, model = train_utils.load_saved_model(saved_path, model)
+    resume_epoch, model = train_utils.load_saved_model_epoch(saved_path, model, opt.eval_epoch)
     print(f"resume from {resume_epoch} epoch.")
     opt.note += f"_epoch{resume_epoch}"
     
@@ -114,9 +115,9 @@ def main():
                             drop_last=False)
     
     # Create the dictionary for evaluation
-    result_stat = {0.3: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
-                0.5: {'tp': [], 'fp': [], 'gt': 0, 'score': []},                
-                0.7: {'tp': [], 'fp': [], 'gt': 0, 'score': []}}
+    result_stat = eval_utils.init_result_stat()
+    class_names = hypes.get('model', {}).get('args', {}).get('class_names', [])
+    class_result_stat = {class_name: eval_utils.init_result_stat() for class_name in class_names}
 
     
     infer_info = opt.fusion_method + opt.note
@@ -161,6 +162,8 @@ def main():
             pred_box_tensor = infer_result['pred_box_tensor']
             gt_box_tensor = infer_result['gt_box_tensor']
             pred_score = infer_result['pred_score']
+            pred_label_tensor = infer_result.get('pred_label_tensor')
+            gt_label_tensor = infer_result.get('gt_label_tensor')
             
             eval_utils.caluclate_tp_fp(pred_box_tensor,
                                     pred_score,
@@ -177,6 +180,10 @@ def main():
                                     gt_box_tensor,
                                     result_stat,
                                     0.7)
+            if class_result_stat:
+                eval_utils.caluclate_tp_fp_multiclass(pred_box_tensor, pred_score, gt_box_tensor, pred_label_tensor, gt_label_tensor, class_result_stat, 0.3, class_names)
+                eval_utils.caluclate_tp_fp_multiclass(pred_box_tensor, pred_score, gt_box_tensor, pred_label_tensor, gt_label_tensor, class_result_stat, 0.5, class_names)
+                eval_utils.caluclate_tp_fp_multiclass(pred_box_tensor, pred_score, gt_box_tensor, pred_label_tensor, gt_label_tensor, class_result_stat, 0.7, class_names)
             if opt.save_npy:
                 npy_save_path = os.path.join(opt.model_dir, 'npy')
                 if not os.path.exists(npy_save_path):
@@ -219,6 +226,8 @@ def main():
 
     _, ap50, ap70 = eval_utils.eval_final_results(result_stat,
                                 opt.model_dir, infer_info)
+    if class_result_stat:
+        eval_utils.eval_final_results_multiclass(class_result_stat, opt.model_dir, infer_info)
 
 if __name__ == '__main__':
     main()

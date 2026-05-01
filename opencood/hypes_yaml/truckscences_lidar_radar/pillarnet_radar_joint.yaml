@@ -1,4 +1,4 @@
-name: pillarnet_radar_teacher
+name: pillarnet_radar_joint
 
 root_dir: "/home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/DatasetTruckscences_mini/trainval/train.pkl"
 validate_dir: "/home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/DatasetTruckscences_mini/trainval/val.pkl"
@@ -8,8 +8,8 @@ ref_frame: 'ego_pose'
 
 yaml_parser: "load_pillarnet_radar_params"
 train_params:
-  batch_size: 1
-  epoches: 20
+  batch_size: 4
+  epoches: 40
   eval_freq: 1
   save_freq: 1
 
@@ -67,7 +67,7 @@ model:
     lidar_num_point_features: 4
     radar_num_point_features: 4
     class_names: ['car', 'truck', 'bus', 'trailer', 'other_vehicle']
-    train_stage: teacher
+    train_stage: joint
     freeze_teacher: false
     teacher_ckpt: ''
     teacher_loss_weight: 1.0

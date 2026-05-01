@@ -141,6 +141,7 @@ def main():
 
                     batch_data = train_utils.to_device(batch_data, device)
                     batch_data['ego']['epoch'] = epoch
+                    batch_data['ego']['compute_loss'] = True
                     ouput_dict = model(batch_data['ego'])
 
                     final_loss = criterion(ouput_dict,

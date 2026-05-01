@@ -1,8 +1,8 @@
 name: pillarnet_radar_distill
 
-root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
-validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
-test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
+root_dir: "/home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/DatasetTruckscences_mini/trainval/train.pkl"
+validate_dir: "/home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/DatasetTruckscences_mini/trainval/val.pkl"
+test_dir: "/home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/DatasetTruckscences_mini/trainval/test.pkl"
 
 ref_frame: 'ego_pose'
 
@@ -66,7 +66,7 @@ model:
     lidar_range: *cav_lidar
     lidar_num_point_features: 4
     radar_num_point_features: 4
-    class_names: ['car']
+    class_names: ['car', 'truck', 'bus', 'trailer', 'other_vehicle']
     train_stage: distill
     freeze_teacher: true
     teacher_ckpt: ''
@@ -101,8 +101,10 @@ model:
       shared_conv_channel: 64
       num_hm_conv: 2
       predict_boxes_when_training: false
+      use_bias_before_norm: true
+      iou_reg: DIoU
       rectifier: 0.5
-      class_names_each_head: [['car']]
+      class_names_each_head: [['car'], ['truck', 'other_vehicle'], ['bus', 'trailer']]
       target_assigner_config:
         feature_map_stride: 8
         num_max_objs: 100

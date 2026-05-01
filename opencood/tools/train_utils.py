@@ -13,6 +13,17 @@ import shutil
 import torch
 import torch.optim as optim
 
+
+def get_torch_load_map_location():
+    """
+    Pick a safe target device for loading checkpoints saved on a different
+    CUDA topology.
+    """
+    if torch.cuda.is_available():
+        return lambda storage, loc: storage.cuda(torch.cuda.current_device())
+    return 'cpu'
+
+
 def backup_script(full_path, folders_to_save=["models", "data_utils", "utils", "loss"]):
     target_folder = os.path.join(full_path, 'scripts')
     if not os.path.exists(target_folder):
@@ -65,7 +76,10 @@ def load_saved_model_epoch(saved_path, model, epoch=None):
         if initial_epoch > 0:
             print('resuming by loading epoch %d' % initial_epoch)
 
-        state_dict_ = torch.load(os.path.join(saved_path, 'net_epoch%d.pth' % initial_epoch))
+        state_dict_ = torch.load(
+            os.path.join(saved_path, 'net_epoch%d.pth' % initial_epoch),
+            map_location=get_torch_load_map_location()
+        )
         state_dict = {}
         # convert data_parallal to model
         for k in state_dict_:
@@ -127,7 +141,10 @@ def load_saved_model(saved_path, model):
         assert len(file_list) == 1
         print("resuming best validation model at epoch %d" % \
                 eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at")))
-        model.load_state_dict(torch.load(file_list[0] , map_location='cpu'), strict=False)
+        model.load_state_dict(
+            torch.load(file_list[0], map_location=get_torch_load_map_location()),
+            strict=False
+        )
         return eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at")), model
 
     initial_epoch = findLastCheckpoint(saved_path)
@@ -135,7 +152,8 @@ def load_saved_model(saved_path, model):
         print('resuming by loading epoch %d' % initial_epoch)
         model.load_state_dict(torch.load(
             os.path.join(saved_path,
-                         'net_epoch%d.pth' % initial_epoch), map_location='cpu'), strict=False)
+                         'net_epoch%d.pth' % initial_epoch),
+            map_location=get_torch_load_map_location()), strict=False)
 
     return initial_epoch, model
 
