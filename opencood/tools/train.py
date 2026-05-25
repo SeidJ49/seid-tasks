@@ -8,6 +8,7 @@ import os
 import statistics
 
 import torch
+from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader, Subset
 from tensorboardX import SummaryWriter
 
@@ -107,6 +108,8 @@ def main():
                 continue
             # the model will be evaluation mode during validation
             model.train()
+            if getattr(scheduler, 'step_per_batch', False):
+                scheduler.step()
             model.zero_grad()
             optimizer.zero_grad()
             batch_data = train_utils.to_device(batch_data, device)
@@ -122,9 +125,10 @@ def main():
 
             # back-propagation
             final_loss.backward()
+            grad_clip_norm = hypes.get('train_params', {}).get('grad_norm_clip', None)
+            if grad_clip_norm is not None:
+                clip_grad_norm_(model.parameters(), grad_clip_norm)
             optimizer.step()
-            if getattr(scheduler, 'step_per_batch', False):
-                scheduler.step()
 
             # torch.cuda.empty_cache()
 

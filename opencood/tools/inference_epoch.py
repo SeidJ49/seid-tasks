@@ -15,6 +15,10 @@ import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.tools import train_utils, inference_utils
 from opencood.data_utils.datasets import build_dataset
 from opencood.utils import eval_utils
+from opencood.utils.truckscenes_eval_utils import (
+    build_prediction_record,
+    run_official_truckscenes_eval,
+)
 from opencood.visualization import vis_utils, my_vis, simple_vis
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -44,6 +48,17 @@ def test_parser():
                              "e2e: time from after dataloader batch to end of inference")
     parser.add_argument('--max_bench_iters', type=int, default=-1,
                         help='Limit the number of timed iterations (-1 = all)')
+    parser.add_argument('--official_eval', type=str, default='none',
+                        choices=['none', 'truckscenes'],
+                        help='run official dataset evaluation after OpenCOOD AP evaluation')
+    parser.add_argument('--truckscenes_root', type=str, default=None,
+                        help='TruckScenes dataroot; if omitted, infer from PKL sensor paths')
+    parser.add_argument('--truckscenes_version', type=str, default='v1.1-mini',
+                        help='TruckScenes version string for official devkit evaluation')
+    parser.add_argument('--truckscenes_devkit_src', type=str, default='/home/nj644/dev/Studis/truckscenes-devkit/src',
+                        help='Path to the TruckScenes devkit src directory')
+    parser.add_argument('--eval_split', type=str, default='val', choices=['val', 'test'],
+                        help='dataset split used for inference and evaluation')
 
     opt = parser.parse_args()
     return opt
@@ -82,9 +97,10 @@ def main():
     #     hypes = parser_func(hypes)
         
     
-    hypes['validate_dir'] = hypes['test_dir']
-    if "OPV2V" in hypes['test_dir'] or "v2xsim" in hypes['test_dir']:
-        assert "test" in hypes['validate_dir']
+    if opt.eval_split == 'test':
+        hypes['validate_dir'] = hypes['test_dir']
+        if "OPV2V" in hypes['test_dir'] or "v2xsim" in hypes['test_dir']:
+            assert "test" in hypes['validate_dir']
     
     # This is used in visualization
     # left hand: OPV2V, V2XSet
@@ -133,6 +149,7 @@ def main():
     
     infer_info = opt.fusion_method + opt.note
     inference_times_ms = []
+    prediction_records = []
 
     for i, batch_data in enumerate(data_loader):
         print(f"{infer_info}_{i}")
@@ -210,6 +227,16 @@ def main():
             pred_score = infer_result['pred_score']
             pred_label_tensor = infer_result.get('pred_label_tensor')
             gt_label_tensor = infer_result.get('gt_label_tensor')
+
+            if opt.official_eval == 'truckscenes':
+                prediction_records.append(
+                    build_prediction_record(
+                        batch_data=batch_data,
+                        infer_result=infer_result,
+                        class_names=class_names,
+                        box_order=opencood_dataset.post_processor.params['order'],
+                    )
+                )
             
             eval_utils.caluclate_tp_fp(pred_box_tensor,
                                     pred_score,
@@ -299,6 +326,19 @@ def main():
                                 opt.model_dir, infer_info)
     if class_result_stat:
         eval_utils.eval_final_results_multiclass(class_result_stat, opt.model_dir, infer_info)
+
+    if opt.official_eval == 'truckscenes':
+        output_dir = os.path.join(opt.model_dir, f'official_truckscenes_{infer_info}')
+        result_str, result_dict = run_official_truckscenes_eval(
+            prediction_records=prediction_records,
+            dataset=opencood_dataset,
+            output_dir=output_dir,
+            version=opt.truckscenes_version,
+            dataroot=opt.truckscenes_root,
+            devkit_src=opt.truckscenes_devkit_src,
+        )
+        print(result_str)
+        print(f'Official TruckScenes metrics saved to {output_dir}')
 
 if __name__ == '__main__':
     main()

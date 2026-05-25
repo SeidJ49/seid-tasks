@@ -1,5 +1,7 @@
 # RadarDistill In OpenCOOD
 
+Session update date: 06.05.2026
+
 This note is the current runbook for the RadarDistill port in this OpenCOOD checkout.
 It focuses on the training flow that is working in this repository now:
 
@@ -218,6 +220,306 @@ Single-run inference example:
 ```bash
 /home/nj644/dev/anaconda3/envs/bm2cp_v2/bin/python \
 	/home/nj644/dev/Studis/seid-tasks/opencood/tools/inference.py \
+
+## Today’s Parity Fixes
+
+The following gaps between RadarDistill/OpenPCDet and this OpenCOOD port were fixed during the current session.
+
+### 1. Active TruckScenes Augmentation Path Is Now Wired
+
+The active lidar+radar dataset path now actually applies the YAML-listed augmentations during training.
+
+Relevant files:
+
+- `data_utils/datasets/lidar_radar/single_dataset_lidar_radar_baseline.py`
+- `data_utils/augmentor/data_augmentor.py`
+- `data_utils/augmentor/augment_utils.py`
+
+Implemented / enabled:
+
+- `random_world_flip`
+- `random_world_rotation`
+- `random_world_scaling`
+- `random_world_translation`
+
+### 2. GT Sampling Is Integrated
+
+OpenCOOD now uses a ground-truth database sampler for TruckScenes training, aligned with the RadarDistill training setup.
+
+Relevant files:
+
+- `data_utils/augmentor/database_sampler.py`
+- `data_utils/augmentor/data_augmentor.py`
+
+Active configs now include `gt_sampling`:
+
+- `hypes_yaml/truckscences_lidar_radar/pillarnet_radar_teacher.yaml`
+- `hypes_yaml/truckscences_lidar_radar/pillarnet_radar_distill.yaml`
+- `hypes_yaml/truckscences_lidar_radar/pillarnet_radar_joint.yaml`
+
+Important distinction:
+
+- `train.pkl` / `val.pkl` / `test.pkl` are OpenCOOD scene PKLs used to enumerate scenes and sensors.
+- `nuscenes_dbinfos_*sweeps_with_radar_withvelo.pkl` plus `gt_database_*` are the GT-sampling artifacts used to paste isolated objects into scenes.
+
+Those are different files and both are needed for parity.
+
+### 3. GT Boxes Are Filtered By LiDAR Support
+
+TruckScenes GT boxes are now filtered by a minimum number of LiDAR hits before target generation, aligned with the RadarDistill teacher setup.
+
+Relevant files:
+
+- `utils/box_utils.py`
+- `data_utils/post_processor/base_postprocessor.py`
+
+Active configs now set:
+
+```yaml
+postprocess:
+	filter_min_points_in_gt: 1
+```
+
+### 4. LiDAR Feature Count Matches RadarDistill Teacher Input
+
+OpenCOOD now uses 5-feature LiDAR input for the active PillarNet teacher / distill / joint configs.
+
+Current LiDAR feature layout in OpenCOOD:
+
+- `x`
+- `y`
+- `z`
+- `intensity`
+- `timestamp`
+
+Relevant file:
+
+- `data_utils/datasets/lidar_radar/single_dataset_lidar_radar_baseline.py`
+
+Current note about timestamp:
+
+- The 5th channel is now present and propagated correctly.
+- For the current 1-sweep OpenCOOD setup, the LiDAR timestamp value is zero.
+- This matches feature-count parity, but not multi-sweep time-lag behavior.
+
+### 5. Sweep Conclusion For The Current Teacher Reference
+
+The current RadarDistill TruckScenes teacher reference is still a 1-sweep setup:
+
+```yaml
+MAX_SWEEPS: 1
+```
+
+Therefore:
+
+- exact parity with that teacher does not require LiDAR multi-sweep loading
+- the current OpenCOOD port is not missing a required LiDAR sweep feature for that reference run
+
+## Current Explanation For The Metric Gap
+
+The remaining gap was not explained by a single cause. The main issues identified were:
+
+- augmentation listed in YAML but previously not applied in the active OpenCOOD dataset path
+- missing `gt_sampling`
+- missing GT min-points filtering
+- LiDAR feature mismatch: 4 features vs 5 features
+
+These affect all classes, not only `truck` and `trailer`, which is why even `car` differed.
+
+## Fresh Training Requirement
+
+All fixes above require a fresh training run.
+
+They do not change the behavior of an already trained checkpoint.
+
+## Optimization Differences
+
+The original strong TruckScenes RadarDistill teacher does not use the old OpenCOOD optimizer setup.
+
+### Old OpenCOOD Behavior
+
+The earlier OpenCOOD teacher runs used:
+
+- `AdamW`
+- PyTorch `OneCycleLR`
+- no source-matched fastai `OptimWrapper`
+- no source-matched `adam_onecycle`
+- no RadarDistill-style momentum scheduling
+
+This older behavior was still able to produce a decent run, but it was not training with the same optimizer logic as RadarDistill.
+
+### Current RadarDistill-Matched Behavior
+
+The active parity teacher config now uses:
+
+- `optimizer.core_method: adam_onecycle`
+- RadarDistill-style fastai `OptimWrapper`
+- RadarDistill-style `OneCycle`
+- `betas: [0.9, 0.99]`
+- `moms: [0.95, 0.85]`
+- `div_factor: 10`
+- `pct_start: 0.4`
+- `grad_norm_clip: 10`
+
+Relevant files:
+
+- `tools/optimization_fastai.py`
+- `tools/train_utils.py`
+- `tools/train.py`
+- `tools/train_ddp.py`
+
+### Important Training-Loop Difference That Was Fixed
+
+RadarDistill applies the per-batch one-cycle update before each training iteration.
+
+OpenCOOD was initially stepping the scheduler after `optimizer.step()`. That means each batch was being trained with a shifted LR/momentum schedule.
+
+This was fixed in:
+
+- `tools/train.py`
+- `tools/train_ddp.py`
+
+### Why The Results Can Differ So Much
+
+The large difference is not explained by one thing only.
+
+The main reasons are:
+
+- optimizer behavior changed from `AdamW + OneCycleLR` to RadarDistill-style `adam_onecycle`
+- the scheduler timing was previously offset by one batch
+- batch size is still different from the reference teacher
+	- OpenCOOD teacher config currently uses `batch_size: 3`
+	- RadarDistill reference uses `BATCH_SIZE_PER_GPU: 4`
+- OpenCOOD resume behavior is not equivalent to RadarDistill checkpoint resume
+	- OpenCOOD `--model_dir` reloads model weights only
+	- it does not restore optimizer state and scheduler state like the original RadarDistill training loop
+- GT sampling in OpenCOOD is still a simplified reimplementation, not the exact OpenPCDet sampler
+
+Because of that, a run can show very different validation loss behavior even when final official TruckScenes metrics are already close.
+
+### Current Interpretation
+
+At this point the remaining gap looks only partly training-dependent.
+
+What is probably training-dependent:
+
+- some run-to-run variation
+- some score calibration changes from batch size and optimizer changes
+
+What is probably not just training noise:
+
+- the class-specific `truck` gap
+- the earlier drop in truck recall compared with RadarDistill
+- the worse truck center/scale quality compared with RadarDistill
+
+That means the optimizer port matters, but the remaining truck gap is still likely influenced by training-data parity, especially GT sampling quality.
+
+### Retrain Rule
+
+For the new optimizer comparison:
+
+- start a fresh run from scratch
+- do not resume an older `AdamW` run with `--model_dir`
+- compare official TruckScenes metrics, not only validation loss
+
+Current useful comparison points:
+
+- older `AdamW` OpenCOOD run:
+	- `/home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_teacher_2026_05_07_09_31_20`
+- newer `adam_onecycle` OpenCOOD run:
+	- `/home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_teacher_2026_05_07_11_29_19`
+- RadarDistill reference:
+	- `/home/nj644/dev/Studis/RadarDistill/output/truckscenes_models/pillarnet_vehicle/truckscenes_vehicle_v3_fixedgeom`
+
+## Larger Dataset Workflow
+
+If a larger TruckScenes training set is needed, two different artifact families must be rebuilt.
+
+### A. OpenCOOD Scene PKLs
+
+These are:
+
+- `train.pkl`
+- `val.pkl`
+- `test.pkl`
+
+They are generated by:
+
+- `/home/nj644/dev/Studis/RadarDistill/pkl_generator_truckscences_opencood_sweeps_5_mini.py`
+
+This script was updated to support CLI arguments instead of hardcoded mini-only paths.
+
+It now supports:
+
+- dataset root selection
+- output directory selection
+- split selection
+- split ratios
+- random seed
+- number of stored radar sweeps
+
+Example usage:
+
+```bash
+/home/nj644/dev/anaconda3/envs/bm2cp_v2/bin/python \
+	/home/nj644/dev/Studis/RadarDistill/pkl_generator_truckscences_opencood_sweeps_5_mini.py \
+	--version v1.1-mini \
+	--dataroot /path/to/man-truckscenes \
+	--output-dir /path/to/output_trainval_dir \
+	--split all \
+	--train-ratio 0.6 \
+	--val-ratio 0.2 \
+	--test-ratio 0.2 \
+	--seed 42 \
+	--radar-sweeps 5
+```
+
+### B. OpenPCDet / RadarDistill Infos And GT Database
+
+These are the artifacts used by the RadarDistill-style info loader and by `gt_sampling`:
+
+- `nuscenes_infos_6radar_*sweeps_train.pkl`
+- `nuscenes_infos_6radar_*sweeps_val.pkl`
+- `nuscenes_dbinfos_*sweeps_with_radar_withvelo.pkl`
+- `gt_database_*sweeps_with_radar_withvelo/`
+
+They are generated by:
+
+- `tools/create_truckscenes_data.py`
+
+Example usage:
+
+```bash
+/home/nj644/dev/anaconda3/envs/opcdet/bin/python \
+	/home/nj644/dev/Studis/RadarDistill/tools/create_truckscenes_data.py \
+	--cfg_file /home/nj644/dev/Studis/RadarDistill/tools/cfgs/dataset_configs/truckscenes_dataset.yaml \
+	--version v1.1-mini \
+	--data_path /path/to/man-truckscenes \
+	--save_path /path/to/man-truckscenes \
+	--split_dir /path/to/splits \
+	--create_db
+```
+
+### Important Rule For Bigger Data
+
+If the training dataset gets bigger, regenerate both:
+
+- OpenCOOD scene PKLs
+- RadarDistill/OpenPCDet infos + dbinfos + gt_database
+
+Rebuilding only one side is not enough.
+
+## Notes On The DB File Name
+
+The GT-sampling DB file currently used in OpenCOOD is named like:
+
+- `nuscenes_dbinfos_1sweeps_with_radar_withvelo.pkl`
+
+Even though the name starts with `nuscenes_`, in this project it is still the TruckScenes-generated database file stored under:
+
+- `.../man-truckscenes/v1.1-mini/`
+
+So the name is historical, but the contents are the correct TruckScenes DB infos.
 	--model_dir /home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_teacher_2026_05_01_16_35_17 \
 	--fusion_method single \
 	--eval_epoch 18

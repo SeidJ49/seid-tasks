@@ -3,13 +3,18 @@ import numpy as np
 
 TRUCKSCENES_NAME_TO_DETECTION = {
     'vehicle.car': 'car',
+    'car': 'car',
     'vehicle.truck': 'truck',
+    'truck': 'truck',
     'vehicle.bus.rigid': 'bus',
     'vehicle.bus.bendy': 'bus',
+    'bus': 'bus',
     'vehicle.trailer': 'trailer',
     'vehicle.ego_trailer': 'trailer',
+    'trailer': 'trailer',
     'vehicle.construction': 'other_vehicle',
     'vehicle.other': 'other_vehicle',
+    'other_vehicle': 'other_vehicle',
 }
 
 

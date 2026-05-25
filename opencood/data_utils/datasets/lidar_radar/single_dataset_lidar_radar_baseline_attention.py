@@ -88,6 +88,9 @@ class SingleDatasetLidarRadarBaselineAttention(Dataset):
                 cav_entry['params'] = OrderedDict()
                 cav_entry['params']['vehicles'] = sample['labels']['gt_boxes_global']
                 cav_entry['params']['object_ids'] = sample['labels']['gt_object_ids'].tolist()
+                cav_entry['params']['sample_token'] = sample.get('sample_token', sample.get('token'))
+                cav_entry['params']['scene_token'] = sample.get('scene_token')
+                cav_entry['params']['timestamp'] = sample.get('timestamp')
                 cav_entry['params']['ego_pose'] = sample['agents']['1']['ego_pose']['transform']
                 cav_entry['params']['lidar_top_front_pose'] = sample['agents']['1']['lidar_top_front_pose']['transform']
                 cav_entry['params']['ego_speed'] = sample['agents']['1']['ego_motion_cabin']
@@ -174,7 +177,12 @@ class SingleDatasetLidarRadarBaselineAttention(Dataset):
         ego_processed.update({
             'transformation_matrix': transformation_matrix,
             'idx': idx,
-            'cav_list': ['ego']
+            'cav_list': ['ego'],
+            'sample_token': ego_base['params'].get('sample_token'),
+            'scene_token': ego_base['params'].get('scene_token'),
+            'timestamp': ego_base['params'].get('timestamp'),
+            'ref_pose': ref_pose,
+            'ref_frame': self.ref_frame,
         })
 
         processed_data_dict['ego'] = ego_processed
@@ -399,6 +407,11 @@ class SingleDatasetLidarRadarBaselineAttention(Dataset):
             'label_dict': label_torch_dict,
             'object_ids': object_ids,
             'transformation_matrix': tm,
+            'sample_token': cav_content.get('sample_token'),
+            'scene_token': cav_content.get('scene_token'),
+            'timestamp': cav_content.get('timestamp'),
+            'ref_pose': cav_content.get('ref_pose'),
+            'ref_frame': cav_content.get('ref_frame'),
         })
 
         if self.visualize:

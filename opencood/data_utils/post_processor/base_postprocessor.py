@@ -350,12 +350,15 @@ class BasePostprocessor(object):
         output_dict = {}
         filter_range = self.params['anchor_args']['cav_lidar_range'] # v2x we don't use GT_RANGE.
 
-        box_utils.project_world_objects_v2x(tmp_object_dict,
-                                        output_dict,
-                                        reference_lidar_pose,
-                                        filter_range,
-                                        self.params['order'],
-                                        lidar_np=lidar_np)
+        box_utils.project_world_objects_v2x(
+            tmp_object_dict,
+            output_dict,
+            reference_lidar_pose,
+            filter_range,
+            self.params['order'],
+            lidar_np=lidar_np,
+            min_points=self.params.get('filter_min_points_in_gt', 0),
+        )
 
         object_np = np.zeros((self.params['max_num'], 7))
         mask = np.zeros(self.params['max_num'])

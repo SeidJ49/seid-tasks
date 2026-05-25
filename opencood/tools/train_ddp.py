@@ -3,6 +3,8 @@ import os
 import statistics
 import glob
 import torch
+import torch.distributed as dist
+from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader, DistributedSampler
 from tensorboardX import SummaryWriter
 
@@ -123,7 +125,7 @@ def main():
     )
 
     # record training
-    writer = SummaryWriter(saved_path)
+    writer = SummaryWriter(saved_path) if opt.rank == 0 else None
 
     # half precision training
     if opt.half:
@@ -145,6 +147,8 @@ def main():
                 continue
             # the model will be evaluation mode during validation
             model.train()
+            if getattr(scheduler, 'step_per_batch', False):
+                scheduler.step()
             model.zero_grad()
             optimizer.zero_grad()
             batch_data = train_utils.to_device(batch_data, device)
@@ -158,7 +162,8 @@ def main():
                     ouput_dict = model(batch_data['ego'])
                     final_loss = criterion(ouput_dict, batch_data['ego']['label_dict'])
 
-            criterion.logging(epoch, i, len(train_loader), writer)
+            if opt.rank == 0:
+                criterion.logging(epoch, i, len(train_loader), writer)
 
             if supervise_single_flag:
                 if not opt.half:
@@ -166,13 +171,20 @@ def main():
                 else:
                     with torch.cuda.amp.autocast():
                         final_loss += criterion(ouput_dict, batch_data['ego']['label_dict_single'], suffix="_single")
-                criterion.logging(epoch, i, len(train_loader), writer, suffix="_single")
+                if opt.rank == 0:
+                    criterion.logging(epoch, i, len(train_loader), writer, suffix="_single")
 
+            grad_clip_norm = hypes.get('train_params', {}).get('grad_norm_clip', None)
             if not opt.half:
                 final_loss.backward()
+                if grad_clip_norm is not None:
+                    clip_grad_norm_(model.parameters(), grad_clip_norm)
                 optimizer.step()
             else:
                 scaler.scale(final_loss).backward()
+                if grad_clip_norm is not None:
+                    scaler.unscale_(optimizer)
+                    clip_grad_norm_(model.parameters(), grad_clip_norm)
                 scaler.step(optimizer)
                 scaler.update()
 
@@ -199,29 +211,37 @@ def main():
                                            batch_data['ego']['label_dict'])
                     valid_ave_loss.append(final_loss.item())
 
-            valid_ave_loss = statistics.mean(valid_ave_loss)
-            print('At epoch %d, the validation loss is %f' % (epoch,
-                                                              valid_ave_loss))
-            writer.add_scalar('Validate_Loss', valid_ave_loss, epoch)
+            valid_loss_sum = float(sum(valid_ave_loss))
+            valid_loss_count = len(valid_ave_loss)
+            if opt.distributed and dist.is_available() and dist.is_initialized():
+                reduced = torch.tensor([valid_loss_sum, valid_loss_count], dtype=torch.float64, device=device)
+                dist.all_reduce(reduced, op=dist.ReduceOp.SUM)
+                valid_loss_sum = float(reduced[0].item())
+                valid_loss_count = int(reduced[1].item())
+            valid_ave_loss = valid_loss_sum / max(valid_loss_count, 1)
+            if opt.rank == 0:
+                print('At epoch %d, the validation loss is %f' % (epoch,
+                                                                  valid_ave_loss))
+                writer.add_scalar('Validate_Loss', valid_ave_loss, epoch)
 
             # lowest val loss
-            if valid_ave_loss < lowest_val_loss:
+            if opt.rank == 0 and valid_ave_loss < lowest_val_loss:
                 lowest_val_loss = valid_ave_loss
                 torch.save(model_without_ddp.state_dict(),
                        os.path.join(saved_path,
                                     'net_epoch_bestval_at%d.pth' % (epoch + 1)))
                 if lowest_val_epoch != -1 and os.path.exists(os.path.join(saved_path,
                                     'net_epoch_bestval_at%d.pth' % (lowest_val_epoch))):
-                    if opt.rank == 0:
-                        os.remove(os.path.join(saved_path,
-                                        'net_epoch_bestval_at%d.pth' % (lowest_val_epoch)))
+                    os.remove(os.path.join(saved_path,
+                                    'net_epoch_bestval_at%d.pth' % (lowest_val_epoch)))
                 lowest_val_epoch = epoch + 1
 
-        if epoch % hypes['train_params']['save_freq'] == 0:
+        if opt.rank == 0 and epoch % hypes['train_params']['save_freq'] == 0:
             torch.save(model_without_ddp.state_dict(),
                        os.path.join(saved_path,
                                     'net_epoch%d.pth' % (epoch + 1)))
-        scheduler.step(epoch)
+        if not getattr(scheduler, 'step_per_batch', False):
+            scheduler.step(epoch)
         
         opencood_train_dataset.reinitialize()
 

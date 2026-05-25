@@ -13,6 +13,8 @@ import shutil
 import torch
 import torch.optim as optim
 
+from opencood.tools.optimization_fastai import OneCycle, OptimWrapper
+
 
 def get_torch_load_map_location():
     """
@@ -278,9 +280,32 @@ def setup_optimizer(hypes, model):
         The pytorch model
     """
     method_dict = hypes['optimizer']
-    optimizer_method = getattr(optim, method_dict['core_method'], None)
+    core_method = method_dict['core_method']
+
+    if core_method == 'adam_onecycle':
+        def children(module):
+            return list(module.children())
+
+        def num_children(module):
+            return len(children(module))
+
+        flatten_model = lambda module: sum(map(flatten_model, module.children()), []) if num_children(module) else [module]
+        get_layer_groups = lambda module: [torch.nn.Sequential(*flatten_model(module))]
+        args = method_dict.get('args', {})
+        betas = tuple(args.get('betas', (0.9, 0.99)))
+        optimizer_func = lambda params: optim.Adam(params, betas=betas)
+        return OptimWrapper.create(
+            optimizer_func,
+            method_dict['lr'],
+            get_layer_groups(model),
+            wd=args.get('weight_decay', 0.0),
+            true_wd=True,
+            bn_wd=True,
+        )
+
+    optimizer_method = getattr(optim, core_method, None)
     if not optimizer_method:
-        raise ValueError('{} is not supported'.format(method_dict['name']))
+        raise ValueError('{} is not supported'.format(core_method))
     if 'args' in method_dict:
         return optimizer_method(model.parameters(),
                                 lr=method_dict['lr'],
@@ -322,19 +347,31 @@ def setup_lr_schedular(hypes, optimizer, init_epoch=None, steps_per_epoch=None):
         scheduler.step_per_batch = False
 
     elif lr_schedule_config['core_method'] == 'onecycle':
-        from torch.optim.lr_scheduler import OneCycleLR
         if steps_per_epoch is None:
             raise ValueError('steps_per_epoch is required for onecycle scheduling')
-        scheduler = OneCycleLR(
-            optimizer,
-            max_lr=lr_schedule_config.get('max_lr', hypes['optimizer']['lr']),
-            epochs=hypes['train_params']['epoches'],
-            steps_per_epoch=steps_per_epoch,
-            pct_start=lr_schedule_config.get('pct_start', 0.4),
-            div_factor=lr_schedule_config.get('div_factor', 10.0),
-            final_div_factor=lr_schedule_config.get('final_div_factor', 1e4),
-            anneal_strategy=lr_schedule_config.get('anneal_strategy', 'cos'),
-        )
+        if hypes['optimizer']['core_method'] == 'adam_onecycle':
+            total_steps = steps_per_epoch * hypes['train_params']['epoches']
+            scheduler = OneCycle(
+                optimizer,
+                total_step=total_steps,
+                lr_max=lr_schedule_config.get('max_lr', hypes['optimizer']['lr']),
+                moms=list(lr_schedule_config.get('moms', [0.95, 0.85])),
+                div_factor=lr_schedule_config.get('div_factor', 10.0),
+                pct_start=lr_schedule_config.get('pct_start', 0.4),
+                last_step=last_epoch * steps_per_epoch,
+            )
+        else:
+            from torch.optim.lr_scheduler import OneCycleLR
+            scheduler = OneCycleLR(
+                optimizer,
+                max_lr=lr_schedule_config.get('max_lr', hypes['optimizer']['lr']),
+                epochs=hypes['train_params']['epoches'],
+                steps_per_epoch=steps_per_epoch,
+                pct_start=lr_schedule_config.get('pct_start', 0.4),
+                div_factor=lr_schedule_config.get('div_factor', 10.0),
+                final_div_factor=lr_schedule_config.get('final_div_factor', 1e4),
+                anneal_strategy=lr_schedule_config.get('anneal_strategy', 'cos'),
+            )
         scheduler.step_per_batch = True
 
     else:

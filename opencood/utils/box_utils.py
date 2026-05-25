@@ -518,7 +518,8 @@ def project_world_objects_v2x(object_dict,
                           reference_lidar_pose,
                           lidar_range,
                           order,
-                          lidar_np):
+                          lidar_np,
+                          min_points=0):
     """
     Project the objects under world coordinates into another coordinate
     based on the provided extrinsic.
@@ -548,7 +549,6 @@ def project_world_objects_v2x(object_dict,
 
     output_dict: [x,y,z, lwh or hwl, yaw] 
     """
-    from icecream import ic
     gt_boxes = object_dict['gt_boxes']
     object_ids = object_dict['object_ids']
     for i, object_content in enumerate(gt_boxes):
@@ -574,9 +574,15 @@ def project_world_objects_v2x(object_dict,
         # bounding box under ego coordinate shape (4, 8)
         bbx = np.r_[bbx, [np.ones(bbx.shape[1])]]
 
-        # project the 8 corners to world coordinate
-        bbx_lidar = np.dot(object2lidar, bbx).T # (8, 4)
-        bbx_lidar = np.expand_dims(bbx_lidar[:, :3], 0) # (1, 8, 3)
+        # project the 8 corners to lidar coordinates
+        bbx_lidar_corners = np.dot(object2lidar, bbx).T[:, :3] # (8, 3)
+
+        if min_points > 0 and lidar_np is not None and lidar_np.shape[0] > 0:
+            points_in_box = get_points_in_rotated_box_3d(lidar_np[:, :3], bbx_lidar_corners)
+            if points_in_box.shape[0] < min_points:
+                continue
+
+        bbx_lidar = np.expand_dims(bbx_lidar_corners, 0) # (1, 8, 3)
         bbx_lidar = corner_to_center(bbx_lidar, order=order)
         
         lidar_range_z_larger = copy.deepcopy(lidar_range)

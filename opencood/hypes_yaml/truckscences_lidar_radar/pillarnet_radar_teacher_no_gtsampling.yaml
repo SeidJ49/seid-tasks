@@ -8,7 +8,7 @@ ref_frame: 'ego_pose'
 
 yaml_parser: "load_pillarnet_radar_params"
 train_params:
-  batch_size: 4
+  batch_size: 3
   epoches: 20
   eval_freq: 1
   save_freq: 1
@@ -38,26 +38,6 @@ preprocess:
   cav_lidar_range: &cav_lidar [-54.0, -54.0, -5.0, 54.0, 54.0, 3.0]
 
 data_augment:
-  - NAME: gt_sampling
-    DB_INFO_PATH:
-      - nuscenes_dbinfos_1sweeps_with_radar_withvelo.pkl
-    PREPARE:
-      filter_by_min_points:
-        - 'car:5'
-        - 'truck:5'
-        - 'bus:5'
-        - 'trailer:5'
-        - 'other_vehicle:5'
-    SAMPLE_GROUPS:
-      - 'car:2'
-      - 'truck:3'
-      - 'bus:4'
-      - 'trailer:6'
-      - 'other_vehicle:4'
-    NUM_POINT_FEATURES: 5
-    DATABASE_WITH_FAKELIDAR: False
-    REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
-    LIMIT_WHOLE_SCENE: True
   - NAME: random_world_flip
     ALONG_AXIS_LIST: ['x', 'y']
   - NAME: random_world_rotation
