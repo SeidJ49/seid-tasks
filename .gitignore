@@ -15,6 +15,7 @@
 lidar_spatial_features/
 psm/
 radar_spatial_features/
+radar_spatial_features
 rm/
 logs/
 *.so

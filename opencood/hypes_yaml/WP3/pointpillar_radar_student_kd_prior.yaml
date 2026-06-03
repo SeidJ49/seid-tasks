@@ -1,0 +1,188 @@
+name: pointpillar_radar_student_kd_prior
+
+root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
+validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
+test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
+
+ref_frame: 'ego_pose'
+
+yaml_parser: "load_point_pillar_params"
+train_params:
+  batch_size: &batch_size 4
+  epoches: 50
+  eval_freq: 1
+  save_freq: 1
+
+# keep lidar in the input list because the current dataset class gates both
+# processed_lidar and processed_radar behind the same flag.
+input_source: ['lidar']
+label_type: 'lidar'
+
+only_vis_ego: true
+
+fusion:
+  core_method: 'SingleDatasetLidarRadarBaseline'
+  dataset: 'v2xsim'
+  args: []
+
+preprocess:
+  core_method: 'SpVoxelPreprocessor'
+  args:
+    voxel_size: &voxel_size [0.4, 0.4, 8]
+
+    max_points_per_voxel: 32
+    max_voxel_train: 32000
+    max_voxel_test: 70000
+    lidar_num_point_features: 4
+
+    radar_max_points_per_voxel: 8
+    radar_max_voxel_train: 12000
+    radar_max_voxel_test: 20000
+    radar_num_point_features: 4
+  cav_lidar_range: &cav_lidar [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
+
+data_augment: []
+
+postprocess:
+  core_method: 'VoxelPostprocessor'
+  gt_range: *cav_lidar
+  anchor_args:
+    cav_lidar_range: *cav_lidar
+    l: 3.9
+    w: 1.6
+    h: 1.56
+    r: &anchor_yaw [0, 90]
+    feature_stride: 2
+    num: &anchor_num 2
+  target_args:
+    pos_threshold: 0.6
+    neg_threshold: 0.45
+    score_threshold: 0.20
+  order: 'hwl'
+  max_num: 100
+  nms_thresh: 0.15
+  dir_args: &dir_args
+    dir_offset: 0.7853
+    num_bins: 2
+    anchor_yaw: *anchor_yaw
+
+model:
+  core_method: point_pillar_radar_student_kd_prior
+  args:
+    voxel_size: *voxel_size
+    lidar_range: *cav_lidar
+    radar_num_point_features: 4
+    anchor_number: *anchor_num
+    dir_args: *dir_args
+    return_kd_motion_mask: true
+    motion_mask_kernel_size: 3
+    motion_mask_scale: 1.0
+    prior_channels: 32
+    prior_static_weight: 0.20
+    doppler_norm: 2.0
+
+    pillar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      num_filters: [64]
+      use_velocity_branch: true
+      velocity_mask:
+        channel: v_r
+        abs: true
+        thresh: 0.15
+        reduce: max
+        mode: soft
+        temp: 12.0
+
+    point_pillar_scatter:
+      num_features: 64
+
+    base_bev_backbone:
+      layer_nums: [3, 5, 8]
+      layer_strides: [2, 2, 2]
+      num_filters: [64, 128, 256]
+      upsample_strides: [1, 2, 4]
+      num_upsample_filter: [128, 128, 128]
+
+    shrink_header:
+      kernal_size: [3]
+      stride: [1]
+      padding: [1]
+      dim: [256]
+      input_dim: 384
+
+loss:
+  core_method: point_pillar_feature_kd_loss
+  args:
+    pos_cls_weight: 1.0
+    cls:
+      type: 'SigmoidFocalLoss'
+      alpha: 0.25
+      gamma: 2.0
+      weight: 1.0
+    reg:
+      type: 'WeightedSmoothL1Loss'
+      sigma: 3.0
+      codewise: true
+      weight: 2.0
+    dir:
+      type: 'WeightedSoftmaxClassificationLoss'
+      weight: 0.2
+      args: *dir_args
+    kd:
+      weight: 0.35
+      feature_loss: smooth_l1
+      student_feature_key: feature
+      teacher_feature_key: teacher_feature
+      motion_mask_key: kd_motion_mask
+      use_motion_mask: true
+      mask_floor: 0.15
+
+optimizer:
+  core_method: Adam
+  lr: 0.002
+  args:
+    eps: 1e-10
+    weight_decay: 1e-4
+
+lr_scheduler:
+  core_method: multistep
+  gamma: 0.1
+  step_size: [25, 40]
+
+kd_flag:
+  teacher_model: point_pillar_lidar_teacher
+  teacher_model_config:
+    voxel_size: *voxel_size
+    lidar_range: *cav_lidar
+    num_point_features: 4
+    anchor_number: *anchor_num
+    dir_args: *dir_args
+    prediction_key_prefix: 'teacher_'
+    feature_key: teacher_feature
+
+    pillar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      num_filters: [64]
+
+    point_pillar_scatter:
+      num_features: 64
+      grid_size: [256, 256, 1]
+
+    base_bev_backbone:
+      layer_nums: [3, 5, 8]
+      layer_strides: [2, 2, 2]
+      num_filters: [64, 128, 256]
+      upsample_strides: [1, 2, 4]
+      num_upsample_filter: [128, 128, 128]
+
+    shrink_header:
+      kernal_size: [3]
+      stride: [1]
+      padding: [1]
+      dim: [256]
+      input_dim: 384
+  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/pointpillar_lidar_teacher_2026_05_04_10_31_16/net_epoch19.pth"

@@ -1,0 +1,66 @@
+name: lidar_reliability_stage3
+
+root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_rain/train.pkl"
+validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_rain/val.pkl"
+test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_rain/test.pkl"
+
+ref_frame: 'ego_pose'
+
+yaml_parser: "load_point_pillar_params"
+
+train_params:
+  batch_size: &batch_size 2
+  epoches: 1
+  eval_freq: 1
+  save_freq: 1
+
+fusion:
+  core_method: 'LateFusionDataset'
+  args: []
+
+preprocess:
+  core_method: 'SpVoxelPreprocessor'
+  args:
+    voxel_size: &voxel_size [0.4, 0.4, 4]
+    max_points_per_voxel: 32
+    max_voxel_train: 16000
+    max_voxel_test: 40000
+  cav_lidar_range: &cav_lidar [-70.4, -40, -3, 70.4, 40, 1]
+
+data_augment: []
+
+postprocess:
+  core_method: 'VoxelPostprocessor'
+  anchor_args:
+    cav_lidar_range: *cav_lidar
+    l: 3.9
+    w: 1.6
+    h: 1.56
+    r: [0, 90]
+    num: &anchor_num 2
+  target_args:
+    pos_threshold: 0.6
+    neg_threshold: 0.45
+    score_threshold: 0.20
+  order: 'hwl'
+  max_num: 100
+  nms_thresh: 0.15
+
+model:
+  core_method: lidar_reliability_stage3
+  args:
+    # load_point_pillar_params populates this grid_size; the wrapper passes it
+    # to the WP4 estimator. No radar/fusion gate belongs in this config.
+    point_pillar_scatter:
+      grid_size: []
+    processed_lidar_key: processed_lidar
+    unreliability:
+      pool_kernel: 7
+      point_count_percentile: 0.95
+      min_point_count_scale: 1.0
+      point_count_weight: 0.6
+      occupancy_sparsity_weight: 0.4
+      valid_region_mode: occupancy_neighborhood
+
+# Diagnostic-only config: use the model outputs directly in an analysis script.
+# There is intentionally no detection loss for WP4 reliability validation.

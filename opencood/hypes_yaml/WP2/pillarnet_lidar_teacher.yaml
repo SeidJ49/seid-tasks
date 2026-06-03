@@ -1,0 +1,161 @@
+name: pillarnet_lidar_teacher
+
+# Update these paths to your local TruckScenes split files before training.
+root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/train.pkl"
+validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
+test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
+
+ref_frame: 'ego_pose'
+
+yaml_parser: "load_pillarnet_params"
+train_params:
+  batch_size: 3
+  epoches: 30
+  eval_freq: 1
+  save_freq: 1
+  grad_norm_clip: 10
+
+input_source: ['lidar']
+label_type: 'lidar'
+only_vis_ego: true
+
+# Use the lidar-radar dataset wrapper because PillarNet consumes raw points.
+# The model below only uses lidar_points.
+fusion:
+  core_method: 'SingleDatasetLidarRadarBaseline'
+  dataset: 'v2xsim'
+  args: []
+
+preprocess:
+  core_method: 'SpVoxelPreprocessor'
+  args:
+    voxel_size: &pre_voxel_size [0.4, 0.4, 8]
+    max_points_per_voxel: 32
+    max_voxel_train: 32000
+    max_voxel_test: 70000
+    lidar_num_point_features: 5
+    radar_max_points_per_voxel: 8
+    radar_max_voxel_train: 12000
+    radar_max_voxel_test: 20000
+    radar_num_point_features: 4
+  cav_lidar_range: &cav_lidar [-54.0, -54.0, -5.0, 54.0, 54.0, 3.0]
+
+data_augment: []
+
+postprocess:
+  core_method: 'VoxelPostprocessor'
+  gt_range: *cav_lidar
+  filter_min_points_in_gt: 1
+  anchor_args:
+    cav_lidar_range: *cav_lidar
+    l: 3.9
+    w: 1.6
+    h: 1.56
+    r: [0, 90]
+    feature_stride: 2
+    num: 2
+  target_args:
+    pos_threshold: 0.6
+    neg_threshold: 0.45
+    score_threshold: 0.20
+  order: 'hwl'
+  max_num: 100
+  nms_thresh: 0.15
+
+model:
+  core_method: pillarnet_lidar_teacher
+  args:
+    model_voxel_size: &model_voxel_size [0.075, 0.075, 8]
+    model_lidar_range: *cav_lidar
+    voxel_size: *model_voxel_size
+    lidar_range: *cav_lidar
+    lidar_num_point_features: 5
+    class_names: ['car', 'truck', 'bus', 'trailer', 'other_vehicle']
+    teacher_loss_weight: 1.0
+    prediction_key_prefix: ''
+    feature_key: feature
+
+    lidar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      use_cluster_xyz: true
+      use_relative_xyz: true
+      num_filters: [32]
+
+    teacher_bev_backbone:
+      layer_nums: [5, 5]
+      num_filters: [256, 256]
+      num_upsample_filters: [128, 128]
+      upsample_strides: [1, 2]
+
+    teacher_head:
+      input_channels: 256
+      shared_conv_channel: 64
+      num_hm_conv: 2
+      predict_boxes_when_training: false
+      use_bias_before_norm: true
+      iou_reg: DIoU
+      rectifier: 0.5
+      class_names_each_head: [['car'], ['truck', 'other_vehicle'], ['bus', 'trailer']]
+      target_assigner_config:
+        feature_map_stride: 8
+        num_max_objs: 500
+        gaussian_overlap: 0.1
+        min_radius: 2
+      separate_head_cfg:
+        head_order: ['center', 'center_z', 'dim', 'rot', 'vel', 'iou']
+        head_dict:
+          center:
+            out_channels: 2
+            num_conv: 2
+          center_z:
+            out_channels: 1
+            num_conv: 2
+          dim:
+            out_channels: 3
+            num_conv: 2
+          rot:
+            out_channels: 2
+            num_conv: 2
+          vel:
+            out_channels: 2
+            num_conv: 2
+          iou:
+            out_channels: 1
+            num_conv: 2
+      loss_config:
+        loss_weights:
+          cls_weight: 1.0
+          loc_weight: 0.25
+          iou_weight: 1.0
+          code_weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2, 1.0, 1.0]
+      post_processing:
+        score_thresh: 0.1
+        max_obj_per_sample: 500
+        post_center_limit_range: [-61.2, -61.2, -10.0, 61.2, 61.2, 10.0]
+        nms_config:
+          nms_thresh: 0.2
+          nms_pre_maxsize: 1000
+          nms_post_maxsize: 83
+
+loss:
+  core_method: radardistill_loss
+  args: {}
+
+optimizer:
+  core_method: adam_onecycle
+  lr: 0.001
+  args:
+    betas: [0.9, 0.99]
+    weight_decay: 0.01
+
+lr_scheduler:
+  core_method: onecycle
+  max_lr: 0.001
+  moms: [0.95, 0.85]
+  pct_start: 0.4
+  div_factor: 10
+  final_div_factor: 10000
+  anneal_strategy: cos
+  gamma: 0.1

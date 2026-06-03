@@ -87,7 +87,7 @@ def load_voxel_params(param):
         param['model']['args']['W'] = anchor_args['W']
         param['model']['args']['H'] = anchor_args['H']
         param['model']['args']['D'] = anchor_args['D']
-    
+
     if 'box_align_pre_calc' in param:
         param['box_align_pre_calc']['stage1_postprocessor_config'].update({'anchor_args': anchor_args})
 
@@ -177,6 +177,83 @@ def load_second_params(param):
 
     param['postprocess'].update({'anchor_args': anchor_args})
 
+    return param
+
+
+def load_pillarnet_params(param):
+    """Populate PillarNet/CenterHead grid and anchor geometry.
+
+    PillarNet uses dynamic pillarization inside the model, so the model grid can
+    intentionally be finer than the preprocessing voxel size.  Use
+    ``model.args.model_voxel_size``/``model_lidar_range`` when present and keep
+    the normal postprocessor anchors tied to ``preprocess``.
+    """
+    cav_lidar_range = param['preprocess']['cav_lidar_range']
+    voxel_size = param['preprocess']['args']['voxel_size']
+
+    anchor_args = param['postprocess']['anchor_args']
+    anchor_args['vw'] = voxel_size[0]
+    anchor_args['vh'] = voxel_size[1]
+    anchor_args['vd'] = voxel_size[2]
+    anchor_args['W'] = math.ceil((cav_lidar_range[3] - cav_lidar_range[0]) / voxel_size[0])
+    anchor_args['H'] = math.ceil((cav_lidar_range[4] - cav_lidar_range[1]) / voxel_size[1])
+    anchor_args['D'] = math.ceil((cav_lidar_range[5] - cav_lidar_range[2]) / voxel_size[2])
+    param['postprocess']['anchor_args'] = anchor_args
+
+    model_args = param['model']['args']
+    model_voxel_size = model_args.get('model_voxel_size', model_args.get('voxel_size', voxel_size))
+    model_range = model_args.get('model_lidar_range', model_args.get('lidar_range', cav_lidar_range))
+    grid_size = (np.array(model_range[3:6]) - np.array(model_range[0:3])) / np.array(model_voxel_size)
+    grid_size = np.round(grid_size).astype(np.int64)
+
+    model_args['grid_size'] = grid_size
+    model_args['voxel_size'] = model_voxel_size
+    model_args['lidar_range'] = model_range
+
+    # Compatibility for older renamed PointPillar-KD configs: if scatter/teacher
+    # KD blocks are present, still populate their geometry. True dynamic
+    # PillarNet/RadarDistill configs simply ignore this branch.
+    if 'point_pillar_scatter' in model_args:
+        model_args['point_pillar_scatter']['grid_size'] = grid_size
+
+    if 'kd_flag' in param and 'teacher_model_config' in param['kd_flag']:
+        teacher_config = param['kd_flag']['teacher_model_config']
+        teacher_config['grid_size'] = grid_size
+        if 'point_pillar_scatter' in teacher_config:
+            teacher_config['point_pillar_scatter']['grid_size'] = grid_size
+
+    return param
+
+
+# Backward-compatible name used by the bm2cp_rd configs.
+load_pillarnet_radar_params = load_pillarnet_params
+
+
+def load_second_thesis_params(param):
+    """Populate SECOND grid/anchor params for TruckScenes teacher/student YAMLs."""
+    cav_lidar_range = param['preprocess']['cav_lidar_range']
+    voxel_size = param['preprocess']['args']['voxel_size']
+
+    grid_size = (np.array(cav_lidar_range[3:6]) - np.array(
+        cav_lidar_range[0:3])) / np.array(voxel_size)
+    grid_size = np.round(grid_size).astype(np.int64)
+
+    if 'model' in param:
+        param['model']['args']['grid_size'] = grid_size
+    if 'kd_flag' in param and 'teacher_model_config' in param['kd_flag']:
+        param['kd_flag']['teacher_model_config']['grid_size'] = grid_size
+
+    anchor_args = param['postprocess']['anchor_args']
+    vw = voxel_size[0]
+    vh = voxel_size[1]
+    vd = voxel_size[2]
+    anchor_args['vw'] = vw
+    anchor_args['vh'] = vh
+    anchor_args['vd'] = vd
+    anchor_args['W'] = int((cav_lidar_range[3] - cav_lidar_range[0]) / vw)
+    anchor_args['H'] = int((cav_lidar_range[4] - cav_lidar_range[1]) / vh)
+    anchor_args['D'] = int((cav_lidar_range[5] - cav_lidar_range[2]) / vd)
+    param['postprocess'].update({'anchor_args': anchor_args})
     return param
 
 
@@ -314,7 +391,7 @@ def load_lift_splat_shoot_params(param):
         cav_lidar_range[0:3])) / \
                 np.array(voxel_size)
     grid_size = np.round(grid_size).astype(np.int64)
-    
+
     anchor_args = param['postprocess']['anchor_args']
 
     vw = voxel_size[0]

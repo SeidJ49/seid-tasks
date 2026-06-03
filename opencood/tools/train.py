@@ -59,7 +59,7 @@ def main():
     print('Creating Model')
     model = train_utils.create_model(hypes)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
+
     # record lowest validation loss checkpoint.
     lowest_val_loss = 1e5
     lowest_val_epoch = -1
@@ -70,14 +70,15 @@ def main():
     # optimizer setup
     optimizer = train_utils.setup_optimizer(hypes, model)
     # lr scheduler setup
-    
+
 
     # if we want to train from last checkpoint.
     if opt.model_dir:
         saved_path = opt.model_dir
         init_epoch, model = train_utils.load_saved_model(saved_path, model)
         lowest_val_epoch = init_epoch
-        scheduler = train_utils.setup_lr_schedular(hypes, optimizer, init_epoch=init_epoch)
+        scheduler = train_utils.setup_lr_schedular(
+            hypes, optimizer, init_epoch=init_epoch, steps_per_epoch=max(len(train_loader), 1))
         print(f"resume from {init_epoch} epoch.")
 
     else:
@@ -85,12 +86,13 @@ def main():
         # if we train the model from scratch, we need to create a folder
         # to save the model,
         saved_path = train_utils.setup_train(hypes)
-        scheduler = train_utils.setup_lr_schedular(hypes, optimizer)
+        scheduler = train_utils.setup_lr_schedular(
+            hypes, optimizer, steps_per_epoch=max(len(train_loader), 1))
 
     # we assume gpu is necessary
     if torch.cuda.is_available():
         model.to(device)
-        
+
     # record training
     writer = SummaryWriter(saved_path)
 
@@ -107,12 +109,14 @@ def main():
                 continue
             # the model will be evaluation mode during validation
             model.train()
+            if getattr(scheduler, 'step_per_batch', False):
+                scheduler.step()
             model.zero_grad()
             optimizer.zero_grad()
             batch_data = train_utils.to_device(batch_data, device)
             batch_data['ego']['epoch'] = epoch
             ouput_dict = model(batch_data['ego'])
-            
+
             final_loss = criterion(ouput_dict, batch_data['ego']['label_dict'])
             criterion.logging(epoch, i, len(train_loader), writer)
 
@@ -139,6 +143,11 @@ def main():
 
                     batch_data = train_utils.to_device(batch_data, device)
                     batch_data['ego']['epoch'] = epoch
+                    # PillarNet/CenterHead models are in eval() during validation,
+                    # so explicitly request target assignment + loss computation.
+                    # Otherwise the model returns only predictions/features and
+                    # RadardistillLoss has no output_dict['loss'] to read.
+                    batch_data['ego']['compute_loss'] = True
                     ouput_dict = model(batch_data['ego'])
 
                     final_loss = criterion(ouput_dict,
@@ -166,7 +175,8 @@ def main():
             torch.save(model.state_dict(),
                        os.path.join(saved_path,
                                     'net_epoch%d.pth' % (epoch + 1)))
-        scheduler.step(epoch)
+        if not getattr(scheduler, 'step_per_batch', False):
+            scheduler.step(epoch)
 
         opencood_train_dataset.reinitialize()
 
@@ -175,7 +185,7 @@ def main():
     run_test = False
     # ddp training may leave multiple bestval
     bestval_model_list = glob.glob(os.path.join(saved_path, "net_epoch_bestval_at*"))
-    
+
     if len(bestval_model_list) > 1:
         import numpy as np
         bestval_model_epoch_list = [eval(x.split("/")[-1].lstrip("net_epoch_bestval_at").rstrip(".pth")) for x in bestval_model_list]

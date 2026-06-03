@@ -10,6 +10,8 @@ from opencood.utils.pcd_utils import shuffle_points, mask_ego_points, downsample
 from opencood.utils.transformation_utils import x1_to_x2
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.data_utils.post_processor import build_postprocessor
+from opencood.data_utils.datasets.truckscenes_class_utils import attach_class_ids, build_class_id_lookup
+from opencood.utils import box_utils
 from opencood.utils.pcd_utils import mask_points_by_range
 
 
@@ -19,25 +21,34 @@ class SingleDatasetLidarRadarBaseline(Dataset):
         self.params = params
         self.visualize = visualize
         self.train = train
+        self.use_point_pillarnet = params.get('model', {}).get('core_method') in {
+            'pillarnet_lidar_teacher',
+            'pillarnet_radar_distill',
+            'pillarnet_radar_student_kd',
+        }
 
         self.ref_frame = params.get('ref_frame', 'ego_pose')
 
-        # Build preprocessors
-        # --- LIDAR ----------------------------------------------------------------------------------------------------
-        lidar_feature_count = params['preprocess']['args']['lidar_num_point_features']
-        lidar_args = {**params['preprocess']['args'], 'num_point_features': lidar_feature_count}
-        self.lidar_pre_processor = build_preprocessor({**params['preprocess'], 'args': lidar_args}, train)
-        # --------------------------------------------------------------------------------------------------------------
+        # Build preprocessors. PillarNet does dynamic pillarization in the model,
+        # so it needs raw points instead of pre-voxelized SpVoxelPreprocessor data.
+        self.lidar_pre_processor = None
+        self.radar_pre_processor = None
+        if not self.use_point_pillarnet:
+            # --- LIDAR ------------------------------------------------------------------------------------------------
+            lidar_feature_count = params['preprocess']['args']['lidar_num_point_features']
+            lidar_args = {**params['preprocess']['args'], 'num_point_features': lidar_feature_count}
+            self.lidar_pre_processor = build_preprocessor({**params['preprocess'], 'args': lidar_args}, train)
+            # ----------------------------------------------------------------------------------------------------------
 
-        # --- RADAR ----------------------------------------------------------------------------------------------------
-        radar_feature_count = params['preprocess']['args']['radar_num_point_features']
-        radar_args = {**params['preprocess']['args'],
-                      'max_points_per_voxel': params['preprocess']['args']['radar_max_points_per_voxel'],
-                      'max_voxel_train': params['preprocess']['args']['radar_max_voxel_train'],
-                      'max_voxel_test': params['preprocess']['args']['radar_max_voxel_test'],
-                      'num_point_features': radar_feature_count}
-        self.radar_pre_processor = build_preprocessor({**params['preprocess'], 'args': radar_args}, train)
-        # --------------------------------------------------------------------------------------------------------------
+            # --- RADAR ------------------------------------------------------------------------------------------------
+            radar_feature_count = params['preprocess']['args']['radar_num_point_features']
+            radar_args = {**params['preprocess']['args'],
+                          'max_points_per_voxel': params['preprocess']['args']['radar_max_points_per_voxel'],
+                          'max_voxel_train': params['preprocess']['args']['radar_max_voxel_train'],
+                          'max_voxel_test': params['preprocess']['args']['radar_max_voxel_test'],
+                          'num_point_features': radar_feature_count}
+            self.radar_pre_processor = build_preprocessor({**params['preprocess'], 'args': radar_args}, train)
+            # ----------------------------------------------------------------------------------------------------------
 
         self.post_processor = build_postprocessor(params["postprocess"], train)
 
@@ -48,6 +59,8 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
         self.label_type = params['label_type']
         assert self.label_type in ['lidar']
+
+        self.class_names = params.get('model', {}).get('args', {}).get('class_names', [])
 
         self.generate_object_center = self.generate_object_center_lidar
         self.generate_object_center_single = self.generate_object_center
@@ -60,8 +73,11 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
         self.reinitialize()
 
-        self.anchor_box = self.post_processor.generate_anchor_box()
-        self.anchor_box_torch = torch.from_numpy(self.anchor_box)
+        self.anchor_box = None
+        self.anchor_box_torch = None
+        if not self.use_point_pillarnet:
+            self.anchor_box = self.post_processor.generate_anchor_box()
+            self.anchor_box_torch = torch.from_numpy(self.anchor_box)
 
     def reinitialize(self):
         self.scene_database = OrderedDict()
@@ -88,6 +104,7 @@ class SingleDatasetLidarRadarBaseline(Dataset):
                 cav_entry['params'] = OrderedDict()
                 cav_entry['params']['vehicles'] = sample['labels']['gt_boxes_global']
                 cav_entry['params']['object_ids'] = sample['labels']['gt_object_ids'].tolist()
+                cav_entry['params']['gt_names'] = sample['labels'].get('gt_names', []).tolist() if hasattr(sample['labels'].get('gt_names', []), 'tolist') else sample['labels'].get('gt_names', [])
                 cav_entry['params']['ego_pose'] = sample['agents']['1']['ego_pose']['transform']
                 cav_entry['params']['lidar_top_front_pose'] = sample['agents']['1']['lidar_top_front_pose']['transform']
                 cav_entry['params']['ego_speed'] = sample['agents']['1']['ego_motion_cabin']
@@ -255,10 +272,21 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
         ref_pose = self.get_ref_pose(selected_cav_base['params'])
         object_bbx_center, object_bbx_mask, object_ids = self.generate_object_center_single([selected_cav_base], ref_pose)
+        if self.use_point_pillarnet and self.class_names:
+            gt_names_src = selected_cav_base['params'].get('gt_names', [])
+            id_to_name = {object_id: gt_name for object_id, gt_name in zip(selected_cav_base['params']['object_ids'], gt_names_src)}
+            class_id_lookup = build_class_id_lookup(
+                [id_to_name.get(object_id, '') for object_id in object_ids],
+                object_ids,
+                self.class_names,
+            )
+            object_bbx_center, object_bbx_mask, object_ids = attach_class_ids(
+                object_bbx_center, object_bbx_mask, object_ids, class_id_lookup
+            )
 
-        # No Cars
+        # No Cars / no selected PillarNet target classes
         if len(object_ids) == 0:
-            print("No Cars in the scene")
+            print("No target classes in the scene" if self.use_point_pillarnet else "No Cars in the scene")
             return None
 
         # --- LIDAR ----------------------------------------------------------------------------------------------------
@@ -268,8 +296,16 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             lidar_np = mask_points_by_range(lidar_np, self.params['preprocess']['cav_lidar_range'])
             lidar_np = mask_ego_points(lidar_np) # FIXME: check it
 
-            lidar_dict = self.lidar_pre_processor.preprocess(lidar_np)
-            selected_cav_processed.update({'processed_lidar': lidar_dict})
+            if self.use_point_pillarnet:
+                # PillarNet/RadarDistill VFE expects x, y, z, intensity, timestamp.
+                # Keep the legacy SpVoxelPreprocessor path at four LiDAR features.
+                if lidar_np.shape[1] == 4:
+                    timestamp = np.zeros((lidar_np.shape[0], 1), dtype=lidar_np.dtype)
+                    lidar_np = np.concatenate([lidar_np, timestamp], axis=1)
+                selected_cav_processed.update({'lidar_points': lidar_np.astype(np.float32)})
+            else:
+                lidar_dict = self.lidar_pre_processor.preprocess(lidar_np)
+                selected_cav_processed.update({'processed_lidar': lidar_dict})
         # --------------------------------------------------------------------------------------------------------------
 
         # --- RADAR ----------------------------------------------------------------------------------------------------
@@ -279,8 +315,10 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             radar_np = mask_points_by_range(radar_np, self.params['preprocess']['cav_lidar_range'])
             radar_np = mask_ego_points(radar_np) # FIXME: check it
 
-            radar_dict = self.radar_pre_processor.preprocess(radar_np)
-            selected_cav_processed.update({'processed_radar': radar_dict})
+            selected_cav_processed.update({'radar_points': radar_np.astype(np.float32)})
+            if not self.use_point_pillarnet:
+                radar_dict = self.radar_pre_processor.preprocess(radar_np)
+                selected_cav_processed.update({'processed_radar': radar_dict})
 
         if self.visualize:
             selected_cav_processed.update({'origin_lidar': lidar_np})
@@ -293,7 +331,11 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             }
         )
 
-        label_dict = self.post_processor.generate_label(gt_box_center=object_bbx_center, anchors=self.anchor_box, mask=object_bbx_mask)
+        label_dict = {}
+        if not self.use_point_pillarnet:
+            label_dict = self.post_processor.generate_label(
+                gt_box_center=object_bbx_center[:, :7], anchors=self.anchor_box, mask=object_bbx_mask
+            )
         selected_cav_processed.update({"label_dict": label_dict})
 
         return selected_cav_processed
@@ -308,6 +350,8 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
         object_bbx_center = []
         object_bbx_mask = []
+        lidar_points_list = []
+        radar_points_list = []
         processed_lidar_list = []
         processed_radar_list = []
         label_dict_list = []
@@ -318,36 +362,46 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             object_bbx_center.append(ego_dict['object_bbx_center'])
             object_bbx_mask.append(ego_dict['object_bbx_mask'])
             label_dict_list.append(ego_dict['label_dict'])
+            if 'lidar_points' in ego_dict:
+                lidar_points_list.append(ego_dict['lidar_points'])
+            if 'radar_points' in ego_dict:
+                radar_points_list.append(ego_dict['radar_points'])
 
             if self.visualize:
                 origin_lidar.append(ego_dict['origin_lidar'])
 
         object_bbx_center = torch.from_numpy(np.array(object_bbx_center))
         object_bbx_mask = torch.from_numpy(np.array(object_bbx_mask))
-        label_torch_dict = self.post_processor.collate_batch(label_dict_list)
-
-        # for centerpoint
-        label_torch_dict.update({'object_bbx_center': object_bbx_center,
-                                 'object_bbx_mask': object_bbx_mask})
+        if self.use_point_pillarnet:
+            label_torch_dict = {'object_bbx_center': object_bbx_center, 'object_bbx_mask': object_bbx_mask}
+        else:
+            label_torch_dict = self.post_processor.collate_batch(label_dict_list)
+            # for centerpoint
+            label_torch_dict.update({'object_bbx_center': object_bbx_center,
+                                     'object_bbx_mask': object_bbx_mask})
 
         output_dict['ego'].update({'object_bbx_center': object_bbx_center,
                                    'object_bbx_mask': object_bbx_mask,
-                                   'anchor_box': torch.from_numpy(self.anchor_box),
                                    'label_dict': label_torch_dict})
+        if self.use_point_pillarnet:
+            output_dict['ego']['lidar_points'] = self._collate_points(lidar_points_list)
+            output_dict['ego']['radar_points'] = self._collate_points(radar_points_list)
+        else:
+            output_dict['ego']['anchor_box'] = torch.from_numpy(self.anchor_box)
         if self.visualize:
             origin_lidar = np.array(downsample_lidar_minimum(pcd_np_list=origin_lidar))
             origin_lidar = torch.from_numpy(origin_lidar)
             output_dict['ego'].update({'origin_lidar': origin_lidar})
 
 
-        if self.load_lidar_file:
+        if self.load_lidar_file and not self.use_point_pillarnet:
             for i in range(len(batch)):
                 processed_lidar_list.append(batch[i]['ego']['processed_lidar'])
             processed_lidar_torch_dict = self.lidar_pre_processor.collate_batch(processed_lidar_list)
             output_dict['ego'].update({'processed_lidar': processed_lidar_torch_dict})
 
         # --- RADAR ----------------------------------------------------------------------------------------------------
-        if self.load_lidar_file:
+        if self.load_lidar_file and not self.use_point_pillarnet:
             for i in range(len(batch)):
                 processed_radar_list.append(batch[i]['ego']['processed_radar'])
             processed_radar_torch_dict = self.radar_pre_processor.collate_batch(processed_radar_list)
@@ -373,23 +427,32 @@ class SingleDatasetLidarRadarBaseline(Dataset):
         object_bbx_mask = torch.from_numpy(np.array([cav_content['object_bbx_mask']]))
         object_ids = cav_content['object_ids']
 
-        output_dict[cav_id].update({"anchor_box": self.anchor_box_torch})
+        if not self.use_point_pillarnet:
+            output_dict[cav_id].update({"anchor_box": self.anchor_box_torch})
+        else:
+            output_dict[cav_id].update({
+                'lidar_points': self._collate_points([cav_content['lidar_points']]),
+                'radar_points': self._collate_points([cav_content['radar_points']]),
+            })
 
-        if self.load_lidar_file:
+        if self.load_lidar_file and not self.use_point_pillarnet:
             processed_lidar_torch_dict = self.lidar_pre_processor.collate_batch([cav_content['processed_lidar']])
             output_dict[cav_id].update({'processed_lidar': processed_lidar_torch_dict})
 
         # --- RADAR ----------------------------------------------------------------------------------------------------
-        if self.load_lidar_file:
+        if self.load_lidar_file and not self.use_point_pillarnet:
             processed_radar_torch_dict = self.radar_pre_processor.collate_batch([cav_content['processed_radar']])
             output_dict[cav_id].update({'processed_radar': processed_radar_torch_dict})
 
 
-        label_torch_dict = self.post_processor.collate_batch([cav_content['label_dict']])
-        label_torch_dict.update({
-            'object_bbx_center': object_bbx_center,
-            'object_bbx_mask': object_bbx_mask
-        })
+        if self.use_point_pillarnet:
+            label_torch_dict = {'object_bbx_center': object_bbx_center, 'object_bbx_mask': object_bbx_mask}
+        else:
+            label_torch_dict = self.post_processor.collate_batch([cav_content['label_dict']])
+            label_torch_dict.update({
+                'object_bbx_center': object_bbx_center,
+                'object_bbx_mask': object_bbx_mask
+            })
 
         tm = torch.from_numpy(np.array(cav_content['transformation_matrix'])).float()
 
@@ -410,12 +473,24 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
 
     def post_process(self, data_dict, output_dict):
+        ego_output = output_dict.get('ego') if isinstance(output_dict, dict) else None
+        if isinstance(ego_output, dict) and 'final_box_dict' in ego_output:
+            final_dict = ego_output['final_box_dict'][0]
+            pred_box_tensor = box_utils.boxes_to_corners_3d(final_dict['pred_boxes'], order=self.post_processor.params['order'])
+            gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
+            return pred_box_tensor, final_dict['pred_scores'], gt_box_tensor
         pred_box_tensor, pred_score = self.post_processor.post_process(data_dict, output_dict)
         gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
 
         return pred_box_tensor, pred_score, gt_box_tensor
 
     def post_process_no_fusion(self, data_dict, output_dict_ego):
+        ego_output = output_dict_ego.get('ego') if isinstance(output_dict_ego, dict) else None
+        if isinstance(ego_output, dict) and 'final_box_dict' in ego_output:
+            final_dict = ego_output['final_box_dict'][0]
+            pred_box_tensor = box_utils.boxes_to_corners_3d(final_dict['pred_boxes'], order=self.post_processor.params['order'])
+            gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
+            return pred_box_tensor, final_dict['pred_scores'], gt_box_tensor
         data_dict_ego = OrderedDict()
         data_dict_ego["ego"] = data_dict["ego"]
         gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
@@ -475,3 +550,11 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
         result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel))
         return result_np
+
+    @staticmethod
+    def _collate_points(points_list):
+        collated = []
+        for batch_index, points in enumerate(points_list):
+            batch_column = np.full((points.shape[0], 1), batch_index, dtype=np.float32)
+            collated.append(np.concatenate([batch_column, points.astype(np.float32)], axis=1))
+        return torch.from_numpy(np.concatenate(collated, axis=0)).float()

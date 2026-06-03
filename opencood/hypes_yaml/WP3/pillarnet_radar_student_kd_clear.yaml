@@ -1,0 +1,195 @@
+name: pillarnet_radar_student_kd_clear
+
+# Adjust paths on the server if needed.
+root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/train.pkl"
+validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
+test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
+
+ref_frame: 'ego_pose'
+
+yaml_parser: "load_pillarnet_params"
+train_params:
+  batch_size: &batch_size 4
+  epoches: 30
+  eval_freq: 1
+  save_freq: 1
+
+# keep lidar in the input list because the current dataset class gates both
+# processed_lidar and processed_radar behind the same flag.
+input_source: ['lidar']
+label_type: 'lidar'
+
+only_vis_ego: true
+
+fusion:
+  core_method: 'SingleDatasetLidarRadarBaseline'
+  dataset: 'v2xsim'
+  args: []
+
+preprocess:
+  core_method: 'SpVoxelPreprocessor'
+  args:
+    voxel_size: &voxel_size [0.4, 0.4, 8]
+
+    max_points_per_voxel: 32
+    max_voxel_train: 32000
+    max_voxel_test: 70000
+    lidar_num_point_features: 4
+
+    radar_max_points_per_voxel: 8
+    radar_max_voxel_train: 12000
+    radar_max_voxel_test: 20000
+    radar_num_point_features: 4
+  cav_lidar_range: &cav_lidar [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
+
+data_augment: []
+
+postprocess:
+  core_method: 'VoxelPostprocessor'
+  gt_range: *cav_lidar
+  anchor_args:
+    cav_lidar_range: *cav_lidar
+    l: 3.9
+    w: 1.6
+    h: 1.56
+    r: &anchor_yaw [0, 90]
+    feature_stride: 2
+    num: &anchor_num 2
+  target_args:
+    pos_threshold: 0.6
+    neg_threshold: 0.45
+    score_threshold: 0.20
+  order: 'hwl'
+  max_num: 100
+  nms_thresh: 0.15
+  dir_args: &dir_args
+    dir_offset: 0.7853
+    num_bins: 2
+    anchor_yaw: *anchor_yaw
+
+model: &student_model
+  core_method: pillarnet_radar_student_kd
+  args:
+    voxel_size: *voxel_size
+    lidar_range: *cav_lidar
+    radar_num_point_features: 4
+    anchor_number: *anchor_num
+    dir_args: *dir_args
+    return_kd_motion_mask: true
+    motion_mask_kernel_size: 7
+    motion_mask_scale: 1.0
+
+    pillar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      num_filters: [64]
+      use_velocity_branch: true
+      velocity_mask:
+        channel: v_r
+        abs: true
+        thresh: 0.15
+        reduce: max
+        mode: soft
+        temp: 12.0
+
+    point_pillar_scatter:
+      num_features: 64
+
+    base_bev_backbone:
+      layer_nums: [3, 5, 8]
+      layer_strides: [2, 2, 2]
+      num_filters: [64, 128, 256]
+      upsample_strides: [1, 2, 4]
+      num_upsample_filter: [128, 128, 128]
+
+    shrink_header:
+      kernal_size: [3]
+      stride: [1]
+      padding: [1]
+      dim: [256]
+      input_dim: 384
+
+loss:
+  core_method: point_pillar_feature_kd_loss
+  args:
+    pos_cls_weight: 1.0
+    cls:
+      type: 'SigmoidFocalLoss'
+      alpha: 0.25
+      gamma: 2.0
+      weight: 1.0
+    reg:
+      type: 'WeightedSmoothL1Loss'
+      sigma: 3.0
+      codewise: true
+      weight: 2.0
+    dir:
+      type: 'WeightedSoftmaxClassificationLoss'
+      weight: 0.2
+      args: *dir_args
+    kd:
+      weight: 1.0
+      feature_loss: mse
+      student_feature_key: feature
+      teacher_feature_key: teacher_feature
+      motion_mask_key: kd_motion_mask
+      use_motion_mask: true
+      # WP3 thesis variant: RadarDistill-inspired, but not copied blindly.
+      # Keep LiDAR feature supervision everywhere via a floor and emphasize
+      # Doppler/motion-relevant radar regions via a boost.
+      mask_floor: 0.10
+      motion_boost: 2.0
+      logit_weight: 0.10
+      student_cls_key: cls_preds
+      teacher_cls_key: teacher_cls_preds
+      temperature: 2.0
+
+optimizer:
+  core_method: adam_onecycle
+  lr: 0.001
+  args:
+    betas: [0.9, 0.99]
+    weight_decay: 0.01
+
+lr_scheduler:
+  core_method: onecycle
+  max_lr: 0.001
+  moms: [0.95, 0.85]
+  pct_start: 0.4
+  div_factor: 10
+  final_div_factor: 10000
+kd_flag:
+  teacher_model: point_pillar_lidar_teacher
+  teacher_model_config:
+    voxel_size: *voxel_size
+    lidar_range: *cav_lidar
+    num_point_features: 4
+    anchor_number: *anchor_num
+    dir_args: *dir_args
+    prediction_key_prefix: 'teacher_'
+    feature_key: teacher_feature
+
+    pillar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      num_filters: [64]
+
+    point_pillar_scatter:
+      num_features: 64
+
+    base_bev_backbone:
+      layer_nums: [3, 5, 8]
+      layer_strides: [2, 2, 2]
+      num_filters: [64, 128, 256]
+      upsample_strides: [1, 2, 4]
+      num_upsample_filter: [128, 128, 128]
+
+    shrink_header:
+      kernal_size: [3]
+      stride: [1]
+      padding: [1]
+      dim: [256]
+      input_dim: 384
+  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/pillarnet_lidar_teacher_2026_06_02_14_16_48/net_epoch12.pth"

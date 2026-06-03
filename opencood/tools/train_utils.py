@@ -12,13 +12,16 @@ from datetime import datetime
 import shutil
 import torch
 import torch.optim as optim
+from functools import partial
+
+from opencood.tools.optimization_fastai import OneCycle, OptimWrapper
 
 def backup_script(full_path, folders_to_save=["models", "data_utils", "utils", "loss"]):
     target_folder = os.path.join(full_path, 'scripts')
     if not os.path.exists(target_folder):
         if not os.path.exists(target_folder):
             os.mkdir(target_folder)
-    
+
     current_path = os.path.dirname(__file__)  # __file__ refer to this file, then the dirname is "?/tools"
 
     for folder_name in folders_to_save:
@@ -171,7 +174,7 @@ def setup_train(hypes):
         with open(save_name, 'w') as outfile:
             yaml.dump(hypes, outfile)
 
-        
+
 
     return full_path
 
@@ -250,44 +253,65 @@ def create_loss(hypes):
 
 def setup_optimizer(hypes, model):
     """
-    Create optimizer corresponding to the yaml file
+    Create optimizer corresponding to the yaml file.
 
-    Parameters
-    ----------
-    hypes : dict
-        The training configurations.
-    model : opencood model
-        The pytorch model
+    Supports the original torch optimizers and RadarDistill/OpenPCDet-style
+    fastai Adam OneCycle via ``optimizer.core_method: adam_onecycle``.
     """
     method_dict = hypes['optimizer']
-    optimizer_method = getattr(optim, method_dict['core_method'], None)
+    core_method = method_dict['core_method']
+    optimizer_args = method_dict.get('args', {})
+
+    if core_method == 'adam_onecycle':
+        betas = optimizer_args.get('betas', (0.9, 0.99))
+        # YAML parses ``[0.9, 0.99]`` as a list, while Adam/FastAI-style
+        # helpers expect beta pairs as tuples.
+        if isinstance(betas, list):
+            betas = tuple(betas)
+        optimizer_func = partial(optim.Adam, betas=betas)
+        return OptimWrapper.create(
+            optimizer_func,
+            method_dict['lr'],
+            [model],
+            wd=optimizer_args.get('weight_decay', 0.01),
+            true_wd=optimizer_args.get('true_wd', True),
+            bn_wd=optimizer_args.get('bn_wd', True),
+        )
+
+    optimizer_method = getattr(optim, core_method, None)
     if not optimizer_method:
-        raise ValueError('{} is not supported'.format(method_dict['name']))
-    if 'args' in method_dict:
+        raise ValueError('{} is not supported'.format(core_method))
+    if optimizer_args:
         return optimizer_method(model.parameters(),
                                 lr=method_dict['lr'],
-                                **method_dict['args'])
-    else:
-        return optimizer_method(model.parameters(),
-                                lr=method_dict['lr'])
+                                **optimizer_args)
+    return optimizer_method(model.parameters(), lr=method_dict['lr'])
 
 
-def setup_lr_schedular(hypes, optimizer, init_epoch=None):
+def setup_lr_schedular(hypes, optimizer, init_epoch=None, steps_per_epoch=None):
     """
-    Set up the learning rate schedular.
+    Set up the learning-rate scheduler.
 
-    Parameters
-    ----------
-    hypes : dict
-        The training configurations.
-
-    optimizer : torch.optimizer
+    OneCycle is stepped per batch. Legacy schedulers are stepped per epoch.
     """
     lr_schedule_config = hypes['lr_scheduler']
     last_epoch = init_epoch if init_epoch is not None else 0
-    
 
-    if lr_schedule_config['core_method'] == 'step':
+    if lr_schedule_config['core_method'] == 'onecycle':
+        if steps_per_epoch is None:
+            steps_per_epoch = 1
+        total_step = hypes['train_params']['epoches'] * max(int(steps_per_epoch), 1)
+        scheduler = OneCycle(
+            optimizer,
+            total_step=total_step,
+            lr_max=lr_schedule_config['max_lr'],
+            moms=lr_schedule_config.get('moms', [0.95, 0.85]),
+            div_factor=lr_schedule_config.get('div_factor', 10),
+            pct_start=lr_schedule_config.get('pct_start', 0.4),
+            last_step=last_epoch * max(int(steps_per_epoch), 1),
+        )
+
+    elif lr_schedule_config['core_method'] == 'step':
         from torch.optim.lr_scheduler import StepLR
         step_size = lr_schedule_config['step_size']
         gamma = lr_schedule_config['gamma']
@@ -306,8 +330,9 @@ def setup_lr_schedular(hypes, optimizer, init_epoch=None):
         gamma = lr_schedule_config['gamma']
         scheduler = ExponentialLR(optimizer, gamma)
 
-    for _ in range(last_epoch):
-        scheduler.step()
+    if not getattr(scheduler, 'step_per_batch', False):
+        for _ in range(last_epoch):
+            scheduler.step()
 
     return scheduler
 

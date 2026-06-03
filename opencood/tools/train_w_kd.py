@@ -72,20 +72,22 @@ def main():
     # record lowest validation loss checkpoint.
     lowest_val_loss = 1e5
     lowest_val_epoch = -1
-    
+
     # if we want to train from last checkpoint.
     if opt.model_dir:
         saved_path = opt.model_dir
         init_epoch, model = train_utils.load_saved_model(saved_path, model)
         lowest_val_epoch = init_epoch
-        scheduler = train_utils.setup_lr_schedular(hypes, optimizer, init_epoch=init_epoch)
+        scheduler = train_utils.setup_lr_schedular(
+            hypes, optimizer, init_epoch=init_epoch, steps_per_epoch=max(len(train_loader), 1))
 
     else:
         init_epoch = 0
         # if we train the model from scratch, we need to create a folder
         # to save the model,
         saved_path = train_utils.setup_train(hypes)
-        scheduler = train_utils.setup_lr_schedular(hypes, optimizer)
+        scheduler = train_utils.setup_lr_schedular(
+            hypes, optimizer, steps_per_epoch=max(len(train_loader), 1))
 
     # record training
     writer = SummaryWriter(saved_path)
@@ -110,10 +112,20 @@ def main():
         for name, cls in model_lib.__dict__.items():
             if name.lower() == target_model_name.lower():
                 teacher_model_class = cls
-        
+
         teacher_model = teacher_model_class(teacher_model_config)
-        teacher_model.load_state_dict(torch.load(teacher_checkpoint_path), strict=False)
-        
+        teacher_state = torch.load(teacher_checkpoint_path, map_location='cpu')
+        if isinstance(teacher_state, dict):
+            if 'state_dict' in teacher_state:
+                teacher_state = teacher_state['state_dict']
+            elif 'model_state_dict' in teacher_state:
+                teacher_state = teacher_state['model_state_dict']
+        teacher_state = {
+            (k[7:] if isinstance(k, str) and k.startswith('module.') else k): v
+            for k, v in teacher_state.items()
+        }
+        teacher_model.load_state_dict(teacher_state, strict=False)
+
         for p in teacher_model.parameters():
             p.requires_grad_(False)
 
@@ -133,6 +145,8 @@ def main():
                 continue
             # the model will be evaluation mode during validation
             model.train()
+            if getattr(scheduler, 'step_per_batch', False):
+                scheduler.step()
             model.zero_grad()
             optimizer.zero_grad()
             batch_data = train_utils.to_device(batch_data, device)
@@ -168,6 +182,10 @@ def main():
 
                     batch_data = train_utils.to_device(batch_data, device)
                     batch_data['ego']['epoch'] = epoch
+                    if hypes.get('loss', {}).get('core_method') in {'radardistill_loss', 'pillarnet_feature_kd_loss'}:
+                        # CenterHead/PillarNet normally skips target assignment
+                        # in eval mode. Validation still needs output_dict['loss'].
+                        batch_data['ego']['compute_loss'] = True
                     ouput_dict = model(batch_data['ego'])
 
                     if kd_flag:
@@ -182,7 +200,7 @@ def main():
             print('At epoch %d, the validation loss is %f' % (epoch,
                                                               valid_ave_loss))
             writer.add_scalar('Validate_Loss', valid_ave_loss, epoch)
-            
+
             # lowest val loss
             if valid_ave_loss < lowest_val_loss:
                 lowest_val_loss = valid_ave_loss
@@ -199,15 +217,16 @@ def main():
             torch.save(model.state_dict(),
                        os.path.join(saved_path,
                                     'net_epoch%d.pth' % (epoch + 1)))
-        scheduler.step(epoch)
+        if not getattr(scheduler, 'step_per_batch', False):
+            scheduler.step(epoch)
 
     print('Training Finished, checkpoints saved to %s' % saved_path)
     torch.cuda.empty_cache()
     run_test = True
-    
+
     # ddp training may leave multiple bestval
     bestval_model_list = glob.glob(os.path.join(saved_path, "net_epoch_bestval_at*"))
-    
+
     if len(bestval_model_list) > 1:
         import numpy as np
         bestval_model_epoch_list = [eval(x.split("/")[-1].lstrip("net_epoch_bestval_at").rstrip(".pth")) for x in bestval_model_list]

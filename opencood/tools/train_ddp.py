@@ -97,7 +97,7 @@ def main():
     # we assume gpu is necessary
     if torch.cuda.is_available():
         model.to(device)
-        
+
     # ddp setting
     model_without_ddp = model
 
@@ -114,8 +114,9 @@ def main():
 
     # optimizer setup
     optimizer = train_utils.setup_optimizer(hypes, model_without_ddp)
-    
-    scheduler = train_utils.setup_lr_schedular(hypes, optimizer, init_epoch=init_epoch)
+
+    scheduler = train_utils.setup_lr_schedular(
+        hypes, optimizer, init_epoch=init_epoch, steps_per_epoch=max(len(train_loader), 1))
 
     # record training
     writer = SummaryWriter(saved_path)
@@ -140,6 +141,8 @@ def main():
                 continue
             # the model will be evaluation mode during validation
             model.train()
+            if getattr(scheduler, 'step_per_batch', False):
+                scheduler.step()
             model.zero_grad()
             optimizer.zero_grad()
             batch_data = train_utils.to_device(batch_data, device)
@@ -215,18 +218,19 @@ def main():
             torch.save(model_without_ddp.state_dict(),
                        os.path.join(saved_path,
                                     'net_epoch%d.pth' % (epoch + 1)))
-        scheduler.step(epoch)
-        
+        if not getattr(scheduler, 'step_per_batch', False):
+            scheduler.step(epoch)
+
         opencood_train_dataset.reinitialize()
 
     print('Training Finished, checkpoints saved to %s' % saved_path)
 
     if opt.rank == 0:
         run_test = True
-        
+
         # ddp training may leave multiple bestval
         bestval_model_list = glob.glob(os.path.join(saved_path, "net_epoch_bestval_at*"))
-        
+
         if len(bestval_model_list) > 1:
             import numpy as np
             bestval_model_epoch_list = [eval(x.split("/")[-1].lstrip("net_epoch_bestval_at").rstrip(".pth")) for x in bestval_model_list]

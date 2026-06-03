@@ -70,20 +70,23 @@ def main():
     # optimizer setup
     optimizer = train_utils.setup_optimizer(hypes, model)
     # lr scheduler setup
-    scheduler = train_utils.setup_lr_schedular(hypes, optimizer)
+    scheduler = train_utils.setup_lr_schedular(
+        hypes, optimizer, steps_per_epoch=max(len(train_loader), 1))
 
     # if we want to train from last checkpoint.
     if opt.model_dir:
         saved_path = opt.model_dir
         init_epoch, model = train_utils.load_saved_model(saved_path, model)
-        scheduler = train_utils.setup_lr_schedular(hypes, optimizer, init_epoch=init_epoch)
+        scheduler = train_utils.setup_lr_schedular(
+            hypes, optimizer, init_epoch=init_epoch, steps_per_epoch=max(len(train_loader), 1))
 
     else:
         init_epoch = 0
         # if we train the model from scratch, we need to create a folder
         # to save the model,
         # saved_path = train_utils.setup_train(hypes)
-        scheduler = train_utils.setup_lr_schedular(hypes, optimizer)
+        scheduler = train_utils.setup_lr_schedular(
+        hypes, optimizer, steps_per_epoch=max(len(train_loader), 1))
 
     print('Training start')
     epoches = hypes['train_params']['epoches']
@@ -96,6 +99,8 @@ def main():
         for i, batch_data in enumerate(train_loader):
             # the model will be evaluation mode during validation
             model.train()
+            if getattr(scheduler, 'step_per_batch', False):
+                scheduler.step()
             model.zero_grad()
             optimizer.zero_grad()
             batch_data = train_utils.to_device(batch_data, device)
@@ -138,7 +143,8 @@ def main():
         #     print('At epoch %d, the validation loss is %f' % (epoch,
         #                                                       valid_ave_loss))
 
-        scheduler.step(epoch)
+        if not getattr(scheduler, 'step_per_batch', False):
+            scheduler.step(epoch)
 
     print('Training Finished, checkpoints saved to %s' % saved_path)
 
