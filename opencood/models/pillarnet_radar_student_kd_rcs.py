@@ -12,11 +12,6 @@ class PillarnetRadarStudentKdRcs(nn.Module):
     """
     WP3 custom PillarNet radar student with motion-aware KD support.
 
-    This is Seid's own lightweight PillarNet student, not the BM2CP
-    RadarDistill model. It uses PillarNet-style dynamic radar pillarization,
-    sparse ResNet BEV encoding, BEV neck, and CenterHead. It does not use
-    PointPillar VFE/scatter/anchor heads.
-
     Expected inputs from the dataset:
     - raw `radar_points` with batch-index column
     - `object_bbx_center` / `object_bbx_mask` with TruckScenes class ids for CenterHead
