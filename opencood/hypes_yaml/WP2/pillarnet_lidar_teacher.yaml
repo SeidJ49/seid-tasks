@@ -9,7 +9,7 @@ ref_frame: 'ego_pose'
 
 yaml_parser: "load_pillarnet_params"
 train_params:
-  batch_size: 3
+  batch_size: 1
   epoches: 30
   eval_freq: 1
   save_freq: 1

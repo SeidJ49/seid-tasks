@@ -21,10 +21,18 @@ class SingleDatasetLidarRadarBaseline(Dataset):
         self.params = params
         self.visualize = visualize
         self.train = train
+        self.radar_point_feature_count = int(
+            params.get('preprocess', {}).get('args', {}).get('radar_num_point_features', 4)
+        )
         self.use_point_pillarnet = params.get('model', {}).get('core_method') in {
             'pillarnet_lidar_teacher',
             'pillarnet_radar_distill',
             'pillarnet_radar_student_kd',
+            'pillarnet_radar_student_kd_rcs',
+            # WP5 true PillarNet fusion also performs dynamic pillarization
+            # inside the model and therefore needs collated raw LiDAR/radar
+            # points instead of pre-voxelized SpVoxelPreprocessor tensors.
+            'pillarnet_reliability_fusion',
         }
 
         self.ref_frame = params.get('ref_frame', 'ego_pose')
@@ -225,7 +233,10 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
 
             # --- VELOCITY PROCESSING ----------------------------------------------------------------------------------
-            radar_np = self.pcd_to_npy_array(s['sensor_path']) # local coordinate
+            radar_np = self.pcd_to_npy_array(
+                s['sensor_path'],
+                include_rcs=self.radar_point_feature_count >= 5,
+            ) # local coordinate
             radar_transform = np.asarray(s['sensor_pose'])
             lidar_velocity_xyz = np.array([cav_content['params']['ego_speed']['vx'],cav_content['params']['ego_speed']['vy'],cav_content['params']['ego_speed']['vz']])
             ref_vehicle_pose = np.array(self.get_ref_pose(cav_content['params']))
@@ -524,17 +535,26 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
     # --- RADAR --------------------------------------------------------------------------------------------------------
     @staticmethod
-    def pcd_to_npy_array(pcd_path):
+    def pcd_to_npy_array(pcd_path, include_rcs=False):
         radar = pypcd.PointCloud.from_path(pcd_path)
         radar_data = radar.pc_data
-        points = np.array([
+        fields = radar_data.dtype.names or ()
+        columns = [
             radar_data["x"],
             radar_data["y"],
             radar_data["z"],
             radar_data["vrel_x"],
             radar_data["vrel_y"],
             radar_data["vrel_z"],
-        ], dtype=np.float64).T
+        ]
+        if include_rcs:
+            rcs_field = next((name for name in ('rcs', 'RCS', 'radar_cross_section') if name in fields), None)
+            if rcs_field is None:
+                rcs_values = np.zeros_like(radar_data["x"], dtype=np.float64)
+            else:
+                rcs_values = radar_data[rcs_field]
+            columns.append(rcs_values)
+        points = np.array(columns, dtype=np.float64).T
         return points
 
 
@@ -548,7 +568,12 @@ class SingleDatasetLidarRadarBaseline(Dataset):
         v_rel_vec = radar_np[:, 3:6]
         v_rel = np.matmul(v_rel_vec, unit_vec.T).diagonal()
 
-        result_np = np.column_stack((radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel))
+        result_columns = [radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel]
+        if radar_np.shape[1] > 6:
+            # Preserve optional radar attributes such as RCS after replacing the
+            # velocity vector with scalar radial velocity.
+            result_columns.extend([radar_np[:, idx] for idx in range(6, radar_np.shape[1])])
+        result_np = np.column_stack(result_columns)
         return result_np
 
     @staticmethod

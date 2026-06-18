@@ -35,6 +35,9 @@ class PillarnetFeatureKdLoss(nn.Module):
         use_motion_mask = bool(self.kd.get('use_motion_mask', True))
         mask_floor = float(self.kd.get('mask_floor', 0.0))
         motion_boost = float(self.kd.get('motion_boost', 0.0))
+        rcs_mask_key = self.kd.get('rcs_mask_key', 'rcs_confidence_mask')
+        use_rcs_mask = bool(self.kd.get('use_rcs_mask', False))
+        rcs_boost = float(self.kd.get('rcs_boost', 0.0))
         logit_weight = float(self.kd.get('logit_weight', 0.0))
         temperature = max(float(self.kd.get('temperature', 1.0)), 1e-6)
 
@@ -66,8 +69,18 @@ class PillarnetFeatureKdLoss(nn.Module):
                 kd_weight_map = motion_mask * (1.0 - mask_floor) + mask_floor
                 if motion_boost > 0.0:
                     kd_weight_map = kd_weight_map * (1.0 + motion_boost * motion_mask)
-                kd_loss = (kd_map * kd_weight_map).sum() / kd_weight_map.sum().clamp_min(1.0)
                 kd_mask_mean = motion_mask.mean().item()
+            else:
+                kd_weight_map = kd_map.new_ones(kd_map.shape[0], 1, kd_map.shape[2], kd_map.shape[3])
+
+            if use_rcs_mask and rcs_mask_key in output_dict and rcs_boost > 0.0:
+                rcs_mask = output_dict[rcs_mask_key].detach().clamp(0.0, 1.0)
+                if rcs_mask.shape[-2:] != kd_map.shape[-2:]:
+                    rcs_mask = F.interpolate(rcs_mask, size=kd_map.shape[-2:], mode='bilinear', align_corners=False)
+                kd_weight_map = kd_weight_map * (1.0 + rcs_boost * rcs_mask)
+
+            if kd_weight_map is not None:
+                kd_loss = (kd_map * kd_weight_map).sum() / kd_weight_map.sum().clamp_min(1.0)
                 kd_weight_mean = kd_weight_map.mean().item()
             else:
                 kd_loss = kd_map.mean()
