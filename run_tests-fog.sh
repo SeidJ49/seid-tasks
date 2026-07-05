@@ -4,15 +4,15 @@ set -u -o pipefail
 REPO_ROOT="/home/ws-ids-es3-01/repo/jadadic_bm2cp"
 TRAIN_PY="$REPO_ROOT/opencood/tools/train.py"
 GPU_ID=0
-export PYTHONPATH="$PWD"
+export PYTHONPATH="$REPO_ROOT"
 
 
 INTERVAL_SECS=$((5*60))
 
 YAMLS=(
-  "$REPO_ROOT/opencood/hypes_yaml/WP1/fog/pointpillar_single_lidar_baseline_wp1-fog.yaml"
-  "$REPO_ROOT/opencood/hypes_yaml/WP1/fog/pointpillar_single_lidar_radar_baseline_wp1-fog.yaml"
-  "$REPO_ROOT/opencood/hypes_yaml/WP1/fog/pointpillar_single_radar_baseline_wp1-fog.yaml"
+  "$REPO_ROOT/opencood/hypes_yaml/WP1/fog/pillarnet_single_lidar_baseline_wp1-fog.yaml"
+  "$REPO_ROOT/opencood/hypes_yaml/WP1/fog/pillarnet_single_lidar_radar_baseline_wp1-fog.yaml"
+  "$REPO_ROOT/opencood/hypes_yaml/WP1/fog/pillarnet_single_radar_baseline_wp1-fog.yaml"
 )
 
 for yml in "${YAMLS[@]}"; do

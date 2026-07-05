@@ -21,11 +21,14 @@ class SingleDatasetLidarRadarBaseline(Dataset):
         self.params = params
         self.visualize = visualize
         self.train = train
-        self.radar_point_feature_count = int(
-            params.get('preprocess', {}).get('args', {}).get('radar_num_point_features', 4)
-        )
+        preprocess_args = params.get('preprocess', {}).get('args', {})
+        self.lidar_point_feature_count = int(preprocess_args.get('lidar_num_point_features', 4))
+        self.radar_point_feature_count = int(preprocess_args.get('radar_num_point_features', 4))
         self.use_point_pillarnet = params.get('model', {}).get('core_method') in {
             'pillarnet_lidar_teacher',
+            'pillarnet_single_lidar_baseline',
+            'pillarnet_single_radar_baseline',
+            'pillarnet_single_lidar_radar_baseline',
             'pillarnet_radar_distill',
             'pillarnet_radar_student_kd',
             'pillarnet_radar_student_kd_rcs',
@@ -33,6 +36,10 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             # inside the model and therefore needs collated raw LiDAR/radar
             # points instead of pre-voxelized SpVoxelPreprocessor tensors.
             'pillarnet_reliability_fusion',
+            'wp5_radar_distill_reliability_fusion',
+            # Compatibility with older WP5 YAML/model naming that still uses
+            # the same dynamic PillarNet LiDAR/radar raw-point contract.
+            'pillarnet_reliability_fusion_radar_distill',
         }
 
         self.ref_frame = params.get('ref_frame', 'ego_pose')
@@ -309,12 +316,15 @@ class SingleDatasetLidarRadarBaseline(Dataset):
 
             if self.use_point_pillarnet:
                 # PillarNet/RadarDistill VFE expects x, y, z, intensity, timestamp.
-                # Keep the legacy SpVoxelPreprocessor path at four LiDAR features.
-                if lidar_np.shape[1] == 4:
-                    timestamp = np.zeros((lidar_np.shape[0], 1), dtype=lidar_np.dtype)
-                    lidar_np = np.concatenate([lidar_np, timestamp], axis=1)
+                # Keep the legacy SpVoxelPreprocessor path at the YAML feature count.
+                lidar_np = self._match_point_feature_count(lidar_np, 5, 'lidar')
                 selected_cav_processed.update({'lidar_points': lidar_np.astype(np.float32)})
             else:
+                # SpVoxelPreprocessor/cumm requires the numpy point width to match
+                # num_point_features exactly. TruckScenes LiDAR variants may carry
+                # an extra timestamp channel; legacy PointPillars configs usually
+                # expect only x, y, z, intensity.
+                lidar_np = self._match_point_feature_count(lidar_np, self.lidar_point_feature_count, 'lidar')
                 lidar_dict = self.lidar_pre_processor.preprocess(lidar_np)
                 selected_cav_processed.update({'processed_lidar': lidar_dict})
         # --------------------------------------------------------------------------------------------------------------
@@ -326,6 +336,7 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             radar_np = mask_points_by_range(radar_np, self.params['preprocess']['cav_lidar_range'])
             radar_np = mask_ego_points(radar_np) # FIXME: check it
 
+            radar_np = self._match_point_feature_count(radar_np, self.radar_point_feature_count, 'radar')
             selected_cav_processed.update({'radar_points': radar_np.astype(np.float32)})
             if not self.use_point_pillarnet:
                 radar_dict = self.radar_pre_processor.preprocess(radar_np)
@@ -486,10 +497,10 @@ class SingleDatasetLidarRadarBaseline(Dataset):
     def post_process(self, data_dict, output_dict):
         ego_output = output_dict.get('ego') if isinstance(output_dict, dict) else None
         if isinstance(ego_output, dict) and 'final_box_dict' in ego_output:
+            gt_box_tensor, gt_label_tensor = self.post_processor.generate_gt_bbx_with_labels(data_dict)
             final_dict = ego_output['final_box_dict'][0]
             pred_box_tensor = box_utils.boxes_to_corners_3d(final_dict['pred_boxes'], order=self.post_processor.params['order'])
-            gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
-            return pred_box_tensor, final_dict['pred_scores'], gt_box_tensor
+            return pred_box_tensor, final_dict['pred_scores'], gt_box_tensor, final_dict.get('pred_labels'), gt_label_tensor
         pred_box_tensor, pred_score = self.post_processor.post_process(data_dict, output_dict)
         gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
 
@@ -498,10 +509,10 @@ class SingleDatasetLidarRadarBaseline(Dataset):
     def post_process_no_fusion(self, data_dict, output_dict_ego):
         ego_output = output_dict_ego.get('ego') if isinstance(output_dict_ego, dict) else None
         if isinstance(ego_output, dict) and 'final_box_dict' in ego_output:
+            gt_box_tensor, gt_label_tensor = self.post_processor.generate_gt_bbx_with_labels(data_dict)
             final_dict = ego_output['final_box_dict'][0]
             pred_box_tensor = box_utils.boxes_to_corners_3d(final_dict['pred_boxes'], order=self.post_processor.params['order'])
-            gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
-            return pred_box_tensor, final_dict['pred_scores'], gt_box_tensor
+            return pred_box_tensor, final_dict['pred_scores'], gt_box_tensor, final_dict.get('pred_labels'), gt_label_tensor
         data_dict_ego = OrderedDict()
         data_dict_ego["ego"] = data_dict["ego"]
         gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
@@ -510,6 +521,12 @@ class SingleDatasetLidarRadarBaseline(Dataset):
         return pred_box_tensor, pred_score, gt_box_tensor
 
     def post_process_no_fusion_uncertainty(self, data_dict, output_dict_ego):
+        ego_output = output_dict_ego.get('ego') if isinstance(output_dict_ego, dict) else None
+        if isinstance(ego_output, dict) and 'final_box_dict' in ego_output:
+            gt_box_tensor, gt_label_tensor = self.post_processor.generate_gt_bbx_with_labels(data_dict)
+            final_dict = ego_output['final_box_dict'][0]
+            pred_box_tensor = box_utils.boxes_to_corners_3d(final_dict['pred_boxes'], order=self.post_processor.params['order'])
+            return pred_box_tensor, final_dict['pred_scores'], gt_box_tensor, final_dict.get('pred_labels'), gt_label_tensor, None
         data_dict_ego = OrderedDict()
         data_dict_ego['ego'] = data_dict['ego']
         gt_box_tensor = self.post_processor.generate_gt_bbx(data_dict)
@@ -575,6 +592,26 @@ class SingleDatasetLidarRadarBaseline(Dataset):
             result_columns.extend([radar_np[:, idx] for idx in range(6, radar_np.shape[1])])
         result_np = np.column_stack(result_columns)
         return result_np
+
+    @staticmethod
+    def _match_point_feature_count(points, expected_features, modality):
+        """Return points with the feature width required by the active YAML.
+
+        cumm/spconv v2 asserts that ``points.shape[1]`` equals the voxel
+        generator's ``num_point_features``. Keep this adjustment at the dataset
+        boundary so raw TruckScenes variants with optional timestamp/RCS channels
+        do not crash the legacy SpVoxelPreprocessor path.
+        """
+        expected_features = int(expected_features)
+        actual_features = int(points.shape[1])
+        if actual_features == expected_features:
+            return points
+        if actual_features > expected_features:
+            return points[:, :expected_features]
+
+        pad_width = expected_features - actual_features
+        padding = np.zeros((points.shape[0], pad_width), dtype=points.dtype)
+        return np.concatenate([points, padding], axis=1)
 
     @staticmethod
     def _collate_points(points_list):

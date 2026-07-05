@@ -1,16 +1,16 @@
-name: pillarnet_radar_student_kd
+name: pillarnet_radar_student_kd_rcs_boost0
 
 # Adjust paths on the server if needed.
-root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
-validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
-test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
+root_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/vulnerable/train.pkl
+validate_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/vulnerable/val.pkl
+test_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/vulnerable/test.pkl
 
 ref_frame: 'ego_pose'
 
 yaml_parser: "load_pillarnet_params"
 train_params:
   batch_size: 4
-  epoches: 30
+  epoches: 40
   eval_freq: 1
   save_freq: 1
   grad_norm_clip: 10
@@ -35,11 +35,11 @@ preprocess:
     max_points_per_voxel: 32
     max_voxel_train: 32000
     max_voxel_test: 70000
-    lidar_num_point_features: 5
+    lidar_num_point_features: 4
     radar_max_points_per_voxel: 8
     radar_max_voxel_train: 12000
     radar_max_voxel_test: 20000
-    radar_num_point_features: 4
+    radar_num_point_features: 5
   cav_lidar_range: &cav_lidar [-54.0, -54.0, -5.0, 54.0, 54.0, 3.0]
 
 data_augment: []
@@ -65,20 +65,33 @@ postprocess:
   nms_thresh: 0.15
 
 model:
-  core_method: pillarnet_radar_student_kd
+  core_method: pillarnet_radar_student_kd_rcs
   args:
     model_voxel_size: &model_voxel_size [0.075, 0.075, 8]
     model_lidar_range: *cav_lidar
     voxel_size: *model_voxel_size
     lidar_range: *cav_lidar
-    radar_num_point_features: 4
+    radar_num_point_features: 5
     class_names: &class_names ['car', 'truck', 'bus', 'trailer', 'other_vehicle', 'pedestrian', 'motorcycle', 'bicycle']
     radar_loss_weight: 1.0
     feature_key: feature
     return_kd_motion_mask: true
+    return_rcs_confidence_mask: true
+    use_rcs_branch: true
+    rcs_boost: 0.0
+    rcs_mask:
+      # Raw PillarNet radar_points are [batch_idx, x, y, z, radial_velocity, rcs].
+      # Use index 5 here; WP1 voxelized RCS configs use index 4 before collation.
+      index: 5
+      thresh: 0.0
+      mode: soft
+      temp: 1.0
+      reduce: max
+      kernel_size: 5
+      scale: 1.0
     radar_velocity_index: 4
-    min_motion_velocity: 0.2
-    motion_mask_kernel_size: 7
+    min_motion_velocity: 0.5
+    motion_mask_kernel_size: 5
     motion_mask_scale: 1.0
 
     radar_vfe:
@@ -149,7 +162,7 @@ loss:
   core_method: pillarnet_feature_kd_loss
   args:
     kd:
-      weight: 1.0
+      weight: 0.1 # Tune this
       feature_loss: mse
       student_feature_key: feature
       teacher_feature_key: teacher_feature
@@ -157,6 +170,9 @@ loss:
       use_motion_mask: true
       mask_floor: 0.10
       motion_boost: 2.0
+      rcs_mask_key: rcs_confidence_mask
+      use_rcs_mask: true
+      rcs_boost: 0.5
       # CenterHead logits are multi-head dicts, so keep logit KD off for now.
       logit_weight: 0.0
       temperature: 2.0
@@ -205,6 +221,5 @@ kd_flag:
       <<: *head_cfg
       predict_boxes_when_training: false
 
-
-  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/WP2/pillarnet_lidar_teacher_2026_06_03_22_40_12/net_epoch12.pth"
+  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/pillarnet_lidar_teacher_2026_07_01_12_51_23/net_epoch10.pth"
   strict_teacher_load: true

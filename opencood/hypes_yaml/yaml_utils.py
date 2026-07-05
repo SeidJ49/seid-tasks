@@ -179,6 +179,29 @@ def load_second_params(param):
 
     return param
 
+def load_wp5_radar_distill_reliability_fusion_params(param):
+    """Populate grid/anchor params for WP5 radar-distill reliability fusion.
+
+    The WP5 model has two PillarNet branches plus a WP4 LiDAR unreliability
+    estimator, so all nested branch configs must receive the same BEV grid
+    metadata as the top-level model.
+    """
+    param = load_pillarnet_params(param)
+    model_args = param['model']['args']
+    grid_size = model_args['grid_size']
+    scatter_grid_size = model_args['point_pillar_scatter']['grid_size']
+
+    for branch_key in ('lidar_branch_args', 'radar_student_args'):
+        if branch_key in model_args:
+            model_args[branch_key]['grid_size'] = grid_size
+            branch_args = model_args[branch_key]
+            if 'point_pillar_scatter' in branch_args:
+                branch_args['point_pillar_scatter']['grid_size'] = scatter_grid_size
+
+    if 'unreliability' in model_args and 'grid_size' not in model_args['unreliability']:
+        model_args['unreliability']['grid_size'] = grid_size
+
+    return param
 
 def load_pillarnet_params(param):
     """Populate PillarNet/CenterHead grid and anchor geometry.

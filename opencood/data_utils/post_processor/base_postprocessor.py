@@ -65,7 +65,6 @@ class BasePostprocessor(object):
             The groundtruth bounding box tensor, shape (N, 8, 3).
         """
         gt_box3d_list = []
-        # used to avoid repetitive bounding box
         object_id_list = []
 
         for cav_id, cav_content in data_dict.items():
@@ -80,7 +79,7 @@ class BasePostprocessor(object):
 
             # convert center to corner
             object_bbx_corner = \
-                box_utils.boxes_to_corners_3d(object_bbx_center,
+                box_utils.boxes_to_corners_3d(object_bbx_center[:, :7],
                                               self.params['order'])
             projected_object_bbx_corner = \
                 box_utils.project_box3d(object_bbx_corner.float(),
@@ -91,19 +90,68 @@ class BasePostprocessor(object):
 
         # gt bbx 3d
         gt_box3d_list = torch.vstack(gt_box3d_list)
-        # some of the bbx may be repetitive, use the id list to filter
-        gt_box3d_selected_indices = \
-            [object_id_list.index(x) for x in set(object_id_list)]
+        seen = set()
+        gt_box3d_selected_indices = []
+        for index, object_id in enumerate(object_id_list):
+            if object_id in seen:
+                continue
+            seen.add(object_id)
+            gt_box3d_selected_indices.append(index)
         gt_box3d_tensor = gt_box3d_list[gt_box3d_selected_indices]
 
-        # filter the gt_box to make sure all bbx are in the range. with z dim
-        gt_box3d_np = gt_box3d_tensor.cpu().numpy()
-        gt_box3d_np = box_utils.mask_boxes_outside_range_numpy(gt_box3d_np,
-                                                    self.params['gt_range'],
-                                                    order=None)
-        gt_box3d_tensor = torch.from_numpy(gt_box3d_np).to(device=gt_box3d_list[0].device)
+        mask = box_utils.get_mask_for_boxes_within_range_torch(gt_box3d_tensor, self.params['gt_range'])
+        gt_box3d_tensor = gt_box3d_tensor[mask]
 
         return gt_box3d_tensor
+
+    def generate_gt_bbx_with_labels(self, data_dict):
+        gt_box3d_list = []
+        gt_label_list = []
+        object_id_list = []
+
+        for cav_id, cav_content in data_dict.items():
+            transformation_matrix = cav_content['transformation_matrix']
+
+            object_bbx_center = cav_content['object_bbx_center']
+            object_bbx_mask = cav_content['object_bbx_mask']
+            object_ids = cav_content['object_ids']
+            object_bbx_center = object_bbx_center[object_bbx_mask == 1]
+
+            if object_bbx_center.shape[0] == 0:
+                continue
+
+            object_bbx_corner = box_utils.boxes_to_corners_3d(object_bbx_center[:, :7], self.params['order'])
+            projected_object_bbx_corner = box_utils.project_box3d(object_bbx_corner.float(), transformation_matrix)
+            gt_box3d_list.append(projected_object_bbx_corner)
+
+            if object_bbx_center.shape[1] > 7:
+                gt_label_list.append(object_bbx_center[:, 7].long())
+            else:
+                gt_label_list.append(torch.ones(object_bbx_center.shape[0], dtype=torch.long, device=object_bbx_center.device))
+            object_id_list += object_ids
+
+        if len(gt_box3d_list) == 0:
+            device = next(iter(data_dict.values()))['transformation_matrix'].device
+            return torch.zeros((0, 8, 3), device=device), torch.zeros((0,), dtype=torch.long, device=device)
+
+        gt_box3d_tensor = torch.vstack(gt_box3d_list)
+        gt_label_tensor = torch.cat(gt_label_list, dim=0)
+
+        seen = set()
+        gt_box3d_selected_indices = []
+        for index, object_id in enumerate(object_id_list):
+            if object_id in seen:
+                continue
+            seen.add(object_id)
+            gt_box3d_selected_indices.append(index)
+
+        gt_box3d_tensor = gt_box3d_tensor[gt_box3d_selected_indices]
+        gt_label_tensor = gt_label_tensor[gt_box3d_selected_indices]
+
+        mask = box_utils.get_mask_for_boxes_within_range_torch(gt_box3d_tensor, self.params['gt_range'])
+        gt_box3d_tensor = gt_box3d_tensor[mask]
+        gt_label_tensor = gt_label_tensor[mask]
+        return gt_box3d_tensor, gt_label_tensor
 
 
     def generate_gt_bbx_by_iou(self, data_dict):
@@ -302,12 +350,14 @@ class BasePostprocessor(object):
         output_dict = {}
         filter_range = self.params['anchor_args']['cav_lidar_range'] # v2x we don't use GT_RANGE.
 
-        box_utils.project_world_objects_v2x(tmp_object_dict,
-                                        output_dict,
-                                        reference_lidar_pose,
-                                        filter_range,
-                                        self.params['order'],
-                                        lidar_np=lidar_np)
+        box_utils.project_world_objects_v2x(
+            tmp_object_dict,
+            output_dict,
+            reference_lidar_pose,
+            filter_range,
+            self.params['order'],
+            lidar_np=lidar_np,
+        )
 
         object_np = np.zeros((self.params['max_num'], 7))
         mask = np.zeros(self.params['max_num'])

@@ -1,4 +1,8 @@
-name: pillarnet_reliability_fusion
+# WP5: PillarNet radar-distillation + reliability-guided LiDAR-radar BEV fusion.
+# Same TruckScenes/PillarNet shape as pillarnet_reliability_fusion.yaml,
+# but the radar branch reuses the WP3 PillarnetRadarStudentKd backbone.
+# Set pretrained_radar_student_checkpoint to a trained WP3 checkpoint when available; null starts from scratch.
+name: pillarnet_reliability_fusion_radar_distill
 
 root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/train.pkl"
 validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
@@ -8,15 +12,15 @@ ref_frame: 'ego_pose'
 
 yaml_parser: "load_pillarnet_params"
 train_params:
-  batch_size: 2
+  batch_size: 3
   epoches: 30
   eval_freq: 1
   save_freq: 1
   grad_norm_clip: 10
 
 # WP5 needs both raw lidar_points and radar_points from the TruckScenes loader.
-# The current SingleDatasetLidarRadarBaseline collate path provides both point
-# tensors even though OpenCOOD's legacy input_source flag is still lidar-named.
+# The dynamic PillarNet branches pillarize inside the model, so the dataset must
+# not only return processed_lidar / processed_radar tensors.
 input_source: ['lidar']
 label_type: 'lidar'
 only_vis_ego: true
@@ -37,7 +41,7 @@ preprocess:
     radar_max_points_per_voxel: 8
     radar_max_voxel_train: 12000
     radar_max_voxel_test: 20000
-    # Needed for raw radar_points = [batch_idx, x, y, z, radial_velocity, rcs]
+    # raw radar_points = [batch_idx, x, y, z, radial_velocity, rcs]
     radar_num_point_features: 5
   cav_lidar_range: &cav_lidar [-54.0, -54.0, -5.0, 54.0, 54.0, 3.0]
 
@@ -64,13 +68,13 @@ postprocess:
   nms_thresh: 0.15
 
 model:
-  core_method: pillarnet_reliability_fusion
+  core_method: pillarnet_reliability_fusion_radar_distill
   args:
     model_voxel_size: &model_voxel_size [0.075, 0.075, 8]
     model_lidar_range: *cav_lidar
     voxel_size: *model_voxel_size
     lidar_range: *cav_lidar
-    grid_size: [1440, 1440, 1]
+    grid_size: &grid_size [1440, 1440, 1]
     class_names: &class_names ['car', 'truck', 'bus', 'trailer', 'other_vehicle', 'pedestrian', 'motorcycle', 'bicycle']
     lidar_num_point_features: 5
     radar_num_point_features: 5
@@ -78,7 +82,7 @@ model:
     feature_key: feature
 
     # WP4-derived U_L: high means LiDAR unreliable. Keep it heuristic and
-    # interpretable for first WP5 version.
+    # interpretable for the first WP5 experiments.
     unreliability:
       pool_kernel: 7
       expected_points_per_cell: 6.0
@@ -86,13 +90,13 @@ model:
       occupancy_sparsity_weight: 0.4
 
     # Radar cues are not a separate radar reliability model; they are simple,
-    # interpretable cue masks used by the local WP5 gate.
-    radar_velocity_index: 4
-    min_motion_velocity: 0.2
-    motion_mask_kernel_size: 7
-    motion_mask_scale: 1.0
-    use_rcs_branch: true
-    rcs_mask:
+    # interpretable cue masks used by the local WP5 gate and WP3 radar student.
+    radar_velocity_index: &radar_velocity_index 4
+    min_motion_velocity: &min_motion_velocity 0.2
+    motion_mask_kernel_size: &motion_mask_kernel_size 7
+    motion_mask_scale: &motion_mask_scale 1.0
+    use_rcs_branch: &use_rcs_branch true
+    rcs_mask: &rcs_mask
       index: 5
       thresh: 0.0
       mode: soft
@@ -109,7 +113,7 @@ model:
       use_relative_xyz: true
       num_filters: [32]
 
-    radar_vfe:
+    radar_vfe: &radar_vfe
       use_norm: true
       with_distance: false
       use_absolute_xyz: true
@@ -123,13 +127,11 @@ model:
       num_upsample_filters: [128, 128]
       upsample_strides: [1, 2]
 
-    radar_bev_backbone: *bev_backbone_cfg
-
     fusion_channels: 256
     fusion_gate:
       hidden_channels: 128
       use_radar_cues: true
-      # 0.5 means half learned from features, half explicitly tied to 1-U_L.
+      # 0.5 means half learned from features, half explicitly tied to 1 - U_L.
       reliability_bias: 0.5
       min_lidar_gate: 0.05
       max_lidar_gate: 0.95
@@ -151,24 +153,12 @@ model:
       separate_head_cfg:
         head_order: ['center', 'center_z', 'dim', 'rot', 'vel', 'iou']
         head_dict:
-          center:
-            out_channels: 2
-            num_conv: 2
-          center_z:
-            out_channels: 1
-            num_conv: 2
-          dim:
-            out_channels: 3
-            num_conv: 2
-          rot:
-            out_channels: 2
-            num_conv: 2
-          vel:
-            out_channels: 2
-            num_conv: 2
-          iou:
-            out_channels: 1
-            num_conv: 2
+          center: {out_channels: 2, num_conv: 2}
+          center_z: {out_channels: 1, num_conv: 2}
+          dim: {out_channels: 3, num_conv: 2}
+          rot: {out_channels: 2, num_conv: 2}
+          vel: {out_channels: 2, num_conv: 2}
+          iou: {out_channels: 1, num_conv: 2}
       loss_config:
         loss_weights:
           cls_weight: 1.0
@@ -183,6 +173,33 @@ model:
           nms_thresh: 0.2
           nms_pre_maxsize: 1000
           nms_post_maxsize: 83
+
+    # WP3 radar student branch. This keeps WP5 tied to the distilled radar
+    # representation instead of training a fresh radar fusion branch.
+    pretrained_radar_student_checkpoint: '/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/WP3/pillarnet_radar_student_kd_rcs_2026_06_07_15_07_29/net_epoch21.pth'
+    freeze_radar_student: true
+    radar_student_args:
+      model_voxel_size: *model_voxel_size
+      model_lidar_range: *cav_lidar
+      voxel_size: *model_voxel_size
+      lidar_range: *cav_lidar
+      grid_size: *grid_size
+      radar_num_point_features: 5
+      class_names: *class_names
+      radar_loss_weight: 1.0
+      feature_key: feature
+      return_kd_motion_mask: true
+      return_rcs_confidence_mask: true
+      use_rcs_branch: *use_rcs_branch
+      rcs_boost: 0.2
+      rcs_mask: *rcs_mask
+      radar_velocity_index: *radar_velocity_index
+      min_motion_velocity: *min_motion_velocity
+      motion_mask_kernel_size: *motion_mask_kernel_size
+      motion_mask_scale: *motion_mask_scale
+      radar_vfe: *radar_vfe
+      radar_bev_backbone: *bev_backbone_cfg
+      radar_head: *head_cfg
 
 loss:
   core_method: radardistill_loss

@@ -1,4 +1,4 @@
-name: pillarnet_radar_student_kd
+name: pillarnet_radar_student_kd_scale_norm
 
 # Adjust paths on the server if needed.
 root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
@@ -146,11 +146,13 @@ model:
           nms_post_maxsize: 83
 
 loss:
-  core_method: pillarnet_feature_kd_loss
+  core_method: pillarnet_feature_kd_scale_norm_loss
   args:
     kd:
       weight: 1.0
       feature_loss: mse
+      feature_normalization: channel_rms
+      normalization_eps: 1.0e-6
       student_feature_key: feature
       teacher_feature_key: teacher_feature
       motion_mask_key: kd_motion_mask
@@ -206,5 +208,5 @@ kd_flag:
       predict_boxes_when_training: false
 
 
-  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/WP2/pillarnet_lidar_teacher_2026_06_03_22_40_12/net_epoch12.pth"
+  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/pillarnet_lidar_teacher_for_scale_norm_kd_2026_07_03_12_10_01/net_epoch11.pth"
   strict_teacher_load: true

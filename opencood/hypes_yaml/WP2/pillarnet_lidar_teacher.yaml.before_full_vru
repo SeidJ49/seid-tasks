@@ -1,26 +1,26 @@
-name: pillarnet_radar_student_kd
+name: pillarnet_lidar_teacher
 
-# Adjust paths on the server if needed.
-root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
-validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
-test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
+# Update these paths to your local TruckScenes split files before training.
+root_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/vulnerable/train.pkl
+validate_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/vulnerable/val.pkl
+test_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/vulnerable/test.pkl
 
 ref_frame: 'ego_pose'
 
 yaml_parser: "load_pillarnet_params"
 train_params:
-  batch_size: 4
-  epoches: 30
+  batch_size: 1
+  epoches: 13
   eval_freq: 1
   save_freq: 1
   grad_norm_clip: 10
 
-# True custom PillarNet student: raw radar_points + PillarNet dynamic VFE,
-# sparse PillarRes backbone, BEV neck, CenterHead, plus motion-aware KD.
 input_source: ['lidar']
 label_type: 'lidar'
 only_vis_ego: true
 
+# Use the lidar-radar dataset wrapper because PillarNet consumes raw points.
+# The model below only uses lidar_points.
 fusion:
   core_method: 'SingleDatasetLidarRadarBaseline'
   dataset: 'v2xsim'
@@ -29,8 +29,6 @@ fusion:
 preprocess:
   core_method: 'SpVoxelPreprocessor'
   args:
-    # Preprocess values are kept for dataset/postprocess compatibility. The
-    # model itself uses model_voxel_size/model_lidar_range below.
     voxel_size: &pre_voxel_size [0.4, 0.4, 8]
     max_points_per_voxel: 32
     max_voxel_train: 32000
@@ -65,23 +63,19 @@ postprocess:
   nms_thresh: 0.15
 
 model:
-  core_method: pillarnet_radar_student_kd
+  core_method: pillarnet_lidar_teacher
   args:
     model_voxel_size: &model_voxel_size [0.075, 0.075, 8]
     model_lidar_range: *cav_lidar
     voxel_size: *model_voxel_size
     lidar_range: *cav_lidar
-    radar_num_point_features: 4
-    class_names: &class_names ['car', 'truck', 'bus', 'trailer', 'other_vehicle', 'pedestrian', 'motorcycle', 'bicycle']
-    radar_loss_weight: 1.0
+    lidar_num_point_features: 5
+    class_names: ['car', 'truck', 'bus', 'trailer', 'other_vehicle', 'pedestrian', 'motorcycle', 'bicycle']
+    teacher_loss_weight: 1.0
+    prediction_key_prefix: ''
     feature_key: feature
-    return_kd_motion_mask: true
-    radar_velocity_index: 4
-    min_motion_velocity: 0.2
-    motion_mask_kernel_size: 7
-    motion_mask_scale: 1.0
 
-    radar_vfe:
+    lidar_vfe:
       use_norm: true
       with_distance: false
       use_absolute_xyz: true
@@ -89,17 +83,17 @@ model:
       use_relative_xyz: true
       num_filters: [32]
 
-    radar_bev_backbone: &bev_backbone_cfg
+    teacher_bev_backbone:
       layer_nums: [5, 5]
       num_filters: [256, 256]
       num_upsample_filters: [128, 128]
       upsample_strides: [1, 2]
 
-    radar_head: &head_cfg
+    teacher_head:
       input_channels: 256
       shared_conv_channel: 64
       num_hm_conv: 2
-      predict_boxes_when_training: true
+      predict_boxes_when_training: false
       use_bias_before_norm: true
       iou_reg: DIoU
       rectifier: 0.5
@@ -146,20 +140,8 @@ model:
           nms_post_maxsize: 83
 
 loss:
-  core_method: pillarnet_feature_kd_loss
-  args:
-    kd:
-      weight: 1.0
-      feature_loss: mse
-      student_feature_key: feature
-      teacher_feature_key: teacher_feature
-      motion_mask_key: kd_motion_mask
-      use_motion_mask: true
-      mask_floor: 0.10
-      motion_boost: 2.0
-      # CenterHead logits are multi-head dicts, so keep logit KD off for now.
-      logit_weight: 0.0
-      temperature: 2.0
+  core_method: radardistill_loss
+  args: {}
 
 optimizer:
   core_method: adam_onecycle
@@ -177,34 +159,3 @@ lr_scheduler:
   final_div_factor: 10000
   anneal_strategy: cos
   gamma: 0.1
-
-kd_flag:
-  teacher_model: pillarnet_lidar_teacher
-  teacher_model_config:
-    model_voxel_size: *model_voxel_size
-    model_lidar_range: *cav_lidar
-    voxel_size: *model_voxel_size
-    lidar_range: *cav_lidar
-    lidar_num_point_features: 5
-    class_names: *class_names
-    teacher_loss_weight: 1.0
-    prediction_key_prefix: 'teacher_'
-    feature_key: teacher_feature
-
-    lidar_vfe:
-      use_norm: true
-      with_distance: false
-      use_absolute_xyz: true
-      use_cluster_xyz: true
-      use_relative_xyz: true
-      num_filters: [32]
-
-    teacher_bev_backbone: *bev_backbone_cfg
-
-    teacher_head:
-      <<: *head_cfg
-      predict_boxes_when_training: false
-
-
-  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/WP2/pillarnet_lidar_teacher_2026_06_03_22_40_12/net_epoch12.pth"
-  strict_teacher_load: true

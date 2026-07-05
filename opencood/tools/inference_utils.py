@@ -14,6 +14,50 @@ from opencood.utils.box_utils import create_bbx, project_box3d, nms_rotated
 from opencood.utils.camera_utils import indices_to_depth
 from sklearn.metrics import mean_squared_error
 
+
+def _pack_inference_result(outputs, uncertainty_tensor=None):
+    if len(outputs) == 3:
+        pred_box_tensor, pred_score, gt_box_tensor = outputs
+        return {
+            "pred_box_tensor": pred_box_tensor,
+            "pred_score": pred_score,
+            "gt_box_tensor": gt_box_tensor,
+        }
+
+    if len(outputs) == 4:
+        pred_box_tensor, pred_score, gt_box_tensor, uncertainty_tensor = outputs
+        return {
+            "pred_box_tensor": pred_box_tensor,
+            "pred_score": pred_score,
+            "gt_box_tensor": gt_box_tensor,
+            "uncertainty_tensor": uncertainty_tensor,
+        }
+
+    if len(outputs) == 5:
+        pred_box_tensor, pred_score, gt_box_tensor, pred_label_tensor, gt_label_tensor = outputs
+        return {
+            "pred_box_tensor": pred_box_tensor,
+            "pred_score": pred_score,
+            "gt_box_tensor": gt_box_tensor,
+            "pred_label_tensor": pred_label_tensor,
+            "gt_label_tensor": gt_label_tensor,
+        }
+
+    if len(outputs) == 6:
+        pred_box_tensor, pred_score, gt_box_tensor, pred_label_tensor, gt_label_tensor, uncertainty_tensor = outputs
+        result = {
+            "pred_box_tensor": pred_box_tensor,
+            "pred_score": pred_score,
+            "gt_box_tensor": gt_box_tensor,
+            "pred_label_tensor": pred_label_tensor,
+            "gt_label_tensor": gt_label_tensor,
+        }
+        if uncertainty_tensor is not None:
+            result["uncertainty_tensor"] = uncertainty_tensor
+        return result
+
+    raise ValueError(f'Unexpected inference output tuple length: {len(outputs)}')
+
 def inference_late_fusion(batch_data, model, dataset):
     """
     Model inference for late fusion.
@@ -36,14 +80,8 @@ def inference_late_fusion(batch_data, model, dataset):
     for cav_id, cav_content in batch_data.items():
         output_dict[cav_id] = model(cav_content)
 
-    pred_box_tensor, pred_score, gt_box_tensor = \
-        dataset.post_process(batch_data,
-                             output_dict)
-
-    return_dict = {"pred_box_tensor" : pred_box_tensor, \
-                    "pred_score" : pred_score, \
-                    "gt_box_tensor" : gt_box_tensor}
-    return return_dict
+    outputs = dataset.post_process(batch_data, output_dict)
+    return _pack_inference_result(outputs)
 
 
 
@@ -75,14 +113,8 @@ def inference_no_fusion(batch_data, model, dataset, single_gt=False):
     # output_dict only contains ego
     # but batch_data havs all cavs, because we need the gt box inside.
 
-    pred_box_tensor, pred_score, gt_box_tensor = \
-        dataset.post_process_no_fusion(batch_data,  # only for late fusion dataset
-                             output_dict_ego)
-
-    return_dict = {"pred_box_tensor" : pred_box_tensor, \
-                    "pred_score" : pred_score, \
-                    "gt_box_tensor" : gt_box_tensor}
-    return return_dict
+    outputs = dataset.post_process_no_fusion(batch_data, output_dict_ego)
+    return _pack_inference_result(outputs)
 
 def inference_no_fusion_w_uncertainty(batch_data, model, dataset):
     """
@@ -107,16 +139,8 @@ def inference_no_fusion_w_uncertainty(batch_data, model, dataset):
     # output_dict only contains ego
     # but batch_data havs all cavs, because we need the gt box inside.
 
-    pred_box_tensor, pred_score, gt_box_tensor, uncertainty_tensor = \
-        dataset.post_process_no_fusion_uncertainty(batch_data, # only for late fusion dataset
-                             output_dict_ego)
-
-    return_dict = {"pred_box_tensor" : pred_box_tensor, \
-                    "pred_score" : pred_score, \
-                    "gt_box_tensor" : gt_box_tensor, \
-                    "uncertainty_tensor" : uncertainty_tensor}
-
-    return return_dict
+    outputs = dataset.post_process_no_fusion_uncertainty(batch_data, output_dict_ego)
+    return _pack_inference_result(outputs)
 
 
 def inference_early_fusion(batch_data, model, dataset):
@@ -140,13 +164,8 @@ def inference_early_fusion(batch_data, model, dataset):
     cav_content = batch_data['ego']
     output_dict['ego'] = model(cav_content)
     
-    pred_box_tensor, pred_score, gt_box_tensor = \
-        dataset.post_process(batch_data,
-                             output_dict)
-    
-    return_dict = {"pred_box_tensor" : pred_box_tensor, \
-                    "pred_score" : pred_score, \
-                    "gt_box_tensor" : gt_box_tensor}
+    outputs = dataset.post_process(batch_data, output_dict)
+    return_dict = _pack_inference_result(outputs)
     if "depth_items" in output_dict['ego']:
         return_dict.update({"depth_items" : output_dict['ego']['depth_items']})
     return return_dict

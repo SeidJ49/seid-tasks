@@ -15,6 +15,16 @@ TRUCKSCENES_NAME_TO_DETECTION = {
     'vehicle.construction': 'other_vehicle',
     'vehicle.other': 'other_vehicle',
     'other_vehicle': 'other_vehicle',
+    'vehicle.motorcycle': 'motorcycle',
+    'motorcycle': 'motorcycle',
+    'vehicle.bicycle': 'bicycle',
+    'bicycle': 'bicycle',
+    'human.pedestrian.adult': 'pedestrian',
+    'human.pedestrian.child': 'pedestrian',
+    'human.pedestrian.construction_worker': 'pedestrian',
+    'human.pedestrian.personal_mobility': 'pedestrian',
+    'human.pedestrian.stroller': 'pedestrian',
+    'pedestrian': 'pedestrian',
 }
 
 

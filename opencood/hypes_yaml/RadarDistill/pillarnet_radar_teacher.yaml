@@ -50,12 +50,18 @@ data_augment:
         - 'bus:5'
         - 'trailer:5'
         - 'other_vehicle:5'
+        - 'pedestrian:5'
+        - 'motorcycle:5'
+        - 'bicycle:5'
     SAMPLE_GROUPS:
       - 'car:2'
       - 'truck:3'
       - 'bus:4'
       - 'trailer:6'
       - 'other_vehicle:4'
+      - 'pedestrian:2'
+      - 'motorcycle:6'
+      - 'bicycle:6'
     NUM_POINT_FEATURES: 5
     DATABASE_WITH_FAKELIDAR: False
     REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
@@ -98,7 +104,7 @@ model:
     lidar_range: *cav_lidar
     lidar_num_point_features: 5
     radar_num_point_features: 4
-    class_names: ['car', 'truck', 'bus', 'trailer', 'other_vehicle']
+    class_names: ['car', 'truck', 'bus', 'trailer', 'other_vehicle', 'pedestrian', 'motorcycle', 'bicycle']
     train_stage: teacher
     freeze_teacher: false
     teacher_ckpt: ''
@@ -136,7 +142,7 @@ model:
       use_bias_before_norm: true
       iou_reg: DIoU
       rectifier: 0.5
-      class_names_each_head: [['car'], ['truck', 'other_vehicle'], ['bus', 'trailer']]
+      class_names_each_head: [['car'], ['truck', 'other_vehicle'], ['bus', 'trailer'], ['pedestrian'], ['motorcycle', 'bicycle']]
       target_assigner_config:
         feature_map_stride: 8
         num_max_objs: 500

@@ -1,6 +1,6 @@
 name: pillarnet_radar_student_kd_gtsampling
 
-root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
+root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/train.pkl"
 validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
 test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
 
@@ -52,12 +52,18 @@ data_augment:
         - 'bus:5'
         - 'trailer:5'
         - 'other_vehicle:5'
+        - 'pedestrian:5'
+        - 'motorcycle:5'
+        - 'bicycle:5'
     SAMPLE_GROUPS:
       - 'car:2'
       - 'truck:3'
       - 'bus:4'
       - 'trailer:6'
       - 'other_vehicle:4'
+      - 'pedestrian:2'
+      - 'motorcycle:6'
+      - 'bicycle:6'
     NUM_POINT_FEATURES: 5
     DATABASE_WITH_FAKELIDAR: False
     REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
@@ -99,7 +105,7 @@ model:
     voxel_size: *model_voxel_size
     lidar_range: *cav_lidar
     radar_num_point_features: 4
-    class_names: &class_names ['car', 'truck', 'bus', 'trailer', 'other_vehicle']
+    class_names: &class_names ['car', 'truck', 'bus', 'trailer', 'other_vehicle', 'pedestrian', 'motorcycle', 'bicycle']
     radar_loss_weight: 1.0
     feature_key: feature
     return_kd_motion_mask: true
@@ -130,7 +136,7 @@ model:
       use_bias_before_norm: true
       iou_reg: DIoU
       rectifier: 0.5
-      class_names_each_head: [['car'], ['truck', 'other_vehicle'], ['bus', 'trailer']]
+      class_names_each_head: [['car'], ['truck', 'other_vehicle'], ['bus', 'trailer'], ['pedestrian'], ['motorcycle', 'bicycle']]
       target_assigner_config:
         feature_map_stride: 8
         num_max_objs: 500
@@ -232,4 +238,5 @@ kd_flag:
       <<: *head_cfg
       predict_boxes_when_training: false
 
-  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/pillarnet_lidar_teacher_2026_06_03_22_40_12/net_epoch12.pth"
+  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/WP2/pillarnet_lidar_teacher_2026_06_03_22_40_12/net_epoch12.pth"
+  strict_teacher_load: true

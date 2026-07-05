@@ -17,6 +17,37 @@ import glob
 from icecream import ic
 
 
+def _format_state_key_report(keys, max_keys=20):
+    keys = list(keys)
+    if not keys:
+        return "none"
+    preview = keys[:max_keys]
+    suffix = "" if len(keys) <= max_keys else f" ... (+{len(keys) - max_keys} more)"
+    return ", ".join(preview) + suffix
+
+
+def _load_teacher_state_dict(teacher_model, checkpoint_path, strict=False):
+    teacher_state = torch.load(checkpoint_path, map_location='cpu')
+    if isinstance(teacher_state, dict):
+        if 'state_dict' in teacher_state:
+            teacher_state = teacher_state['state_dict']
+        elif 'model_state_dict' in teacher_state:
+            teacher_state = teacher_state['model_state_dict']
+    teacher_state = {
+        (k[7:] if isinstance(k, str) and k.startswith('module.') else k): v
+        for k, v in teacher_state.items()
+    }
+    load_result = teacher_model.load_state_dict(teacher_state, strict=strict)
+    missing = getattr(load_result, 'missing_keys', [])
+    unexpected = getattr(load_result, 'unexpected_keys', [])
+    print(f"[KD teacher] checkpoint: {checkpoint_path}")
+    print(f"[KD teacher] strict load: {strict}")
+    print(f"[KD teacher] loaded tensors: {len(teacher_state)}")
+    print(f"[KD teacher] missing keys ({len(missing)}): {_format_state_key_report(missing)}")
+    print(f"[KD teacher] unexpected keys ({len(unexpected)}): {_format_state_key_report(unexpected)}")
+    return missing, unexpected
+
+
 def train_parser():
     parser = argparse.ArgumentParser(description="synthetic data generation")
     parser.add_argument("--hypes_yaml", "-y", type=str, required=True,
@@ -114,17 +145,8 @@ def main():
                 teacher_model_class = cls
 
         teacher_model = teacher_model_class(teacher_model_config)
-        teacher_state = torch.load(teacher_checkpoint_path, map_location='cpu')
-        if isinstance(teacher_state, dict):
-            if 'state_dict' in teacher_state:
-                teacher_state = teacher_state['state_dict']
-            elif 'model_state_dict' in teacher_state:
-                teacher_state = teacher_state['model_state_dict']
-        teacher_state = {
-            (k[7:] if isinstance(k, str) and k.startswith('module.') else k): v
-            for k, v in teacher_state.items()
-        }
-        teacher_model.load_state_dict(teacher_state, strict=False)
+        teacher_strict = bool(hypes['kd_flag'].get('strict_teacher_load', False))
+        _load_teacher_state_dict(teacher_model, teacher_checkpoint_path, strict=teacher_strict)
 
         for p in teacher_model.parameters():
             p.requires_grad_(False)
@@ -182,7 +204,11 @@ def main():
 
                     batch_data = train_utils.to_device(batch_data, device)
                     batch_data['ego']['epoch'] = epoch
-                    if hypes.get('loss', {}).get('core_method') in {'radardistill_loss', 'pillarnet_feature_kd_loss'}:
+                    if hypes.get('loss', {}).get('core_method') in {
+                        'radardistill_loss',
+                        'pillarnet_feature_kd_loss',
+                        'pillarnet_feature_kd_scale_norm_loss',
+                    }:
                         # CenterHead/PillarNet normally skips target assignment
                         # in eval mode. Validation still needs output_dict['loss'].
                         batch_data['ego']['compute_loss'] = True

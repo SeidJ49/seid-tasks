@@ -192,4 +192,5 @@ kd_flag:
       padding: [1]
       dim: [256]
       input_dim: 384
-  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/pillarnet_lidar_teacher_2026_06_02_14_16_48/net_epoch12.pth"
+  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/WP2/pillarnet_lidar_teacher_2026_06_03_22_40_12/net_epoch12.pth"
+  strict_teacher_load: true

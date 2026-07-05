@@ -1,16 +1,16 @@
 name: pillarnet_lidar_teacher
 
 # Update these paths to your local TruckScenes split files before training.
-root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/train.pkl"
-validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
-test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
+root_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/full_vulnerable_balanced/train_vru_oversampled.pkl
+validate_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/full_vulnerable_balanced/val.pkl
+test_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/full_vulnerable_balanced/test.pkl
 
 ref_frame: 'ego_pose'
 
 yaml_parser: "load_pillarnet_params"
 train_params:
   batch_size: 1
-  epoches: 30
+  epoches: 40
   eval_freq: 1
   save_freq: 1
   grad_norm_clip: 10
@@ -57,7 +57,7 @@ postprocess:
   target_args:
     pos_threshold: 0.6
     neg_threshold: 0.45
-    score_threshold: 0.20
+    score_threshold: 0.05
   order: 'hwl'
   max_num: 100
   nms_thresh: 0.15
@@ -70,7 +70,7 @@ model:
     voxel_size: *model_voxel_size
     lidar_range: *cav_lidar
     lidar_num_point_features: 5
-    class_names: ['car', 'truck', 'bus', 'trailer', 'other_vehicle']
+    class_names: ['car', 'truck', 'bus', 'trailer', 'other_vehicle', 'pedestrian', 'motorcycle', 'bicycle']
     teacher_loss_weight: 1.0
     prediction_key_prefix: ''
     feature_key: feature
@@ -97,7 +97,7 @@ model:
       use_bias_before_norm: true
       iou_reg: DIoU
       rectifier: 0.5
-      class_names_each_head: [['car'], ['truck', 'other_vehicle'], ['bus', 'trailer']]
+      class_names_each_head: [['car'], ['truck', 'other_vehicle'], ['bus', 'trailer'], ['pedestrian'], ['motorcycle', 'bicycle']]
       target_assigner_config:
         feature_map_stride: 8
         num_max_objs: 500
@@ -131,13 +131,13 @@ model:
           iou_weight: 1.0
           code_weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2, 1.0, 1.0]
       post_processing:
-        score_thresh: 0.1
+        score_thresh: 0.03
         max_obj_per_sample: 500
         post_center_limit_range: [-61.2, -61.2, -10.0, 61.2, 61.2, 10.0]
         nms_config:
           nms_thresh: 0.2
-          nms_pre_maxsize: 1000
-          nms_post_maxsize: 83
+          nms_pre_maxsize: 2000
+          nms_post_maxsize: 200
 
 loss:
   core_method: radardistill_loss

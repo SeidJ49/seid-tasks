@@ -1,20 +1,20 @@
-name: pillarnet_radardistill_teacher
+name: pillarnet_single_lidar_radar_baseline_wp1
 
-root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/train.pkl"
-validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/val.pkl"
+root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/train.pkl"
+validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/val.pkl"
 test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_big/trainval/test.pkl"
 
 ref_frame: 'ego_pose'
 
-yaml_parser: "load_pillarnet_radar_params"
+yaml_parser: "load_pillarnet_params"
 train_params:
-  batch_size: 3
-  epoches: 20
+  batch_size: 2
+  epoches: 30
   eval_freq: 1
   save_freq: 1
   grad_norm_clip: 10
 
-input_source: ['lidar']
+input_source: ['lidar', 'radar']
 label_type: 'lidar'
 only_vis_ego: true
 
@@ -37,15 +37,7 @@ preprocess:
     radar_num_point_features: 4
   cav_lidar_range: &cav_lidar [-54.0, -54.0, -5.0, 54.0, 54.0, 3.0]
 
-data_augment:
-  - NAME: random_world_flip
-    ALONG_AXIS_LIST: ['x', 'y']
-  - NAME: random_world_rotation
-    WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
-  - NAME: random_world_scaling
-    WORLD_SCALE_RANGE: [0.9, 1.1]
-  - NAME: random_world_translation
-    NOISE_TRANSLATE_STD: [0.5, 0.5, 0.5]
+data_augment: []
 
 postprocess:
   core_method: 'VoxelPostprocessor'
@@ -68,49 +60,22 @@ postprocess:
   nms_thresh: 0.15
 
 model:
-  core_method: pillarnet_radar_distill
+  core_method: pillarnet_single_lidar_radar_baseline
   args:
     model_voxel_size: &model_voxel_size [0.075, 0.075, 8]
     model_lidar_range: *cav_lidar
     voxel_size: *model_voxel_size
     lidar_range: *cav_lidar
-    lidar_num_point_features: 5
-    radar_num_point_features: 4
-    class_names: ['car', 'truck', 'bus', 'trailer', 'other_vehicle', 'pedestrian', 'motorcycle', 'bicycle']
-    train_stage: teacher
-    freeze_teacher: false
-    teacher_ckpt: ''
-    teacher_loss_weight: 1.0
-    radar_loss_weight: 1.0
-    distill_loss_weight: 1.0
-
-    lidar_vfe:
-      use_norm: true
-      with_distance: false
-      use_absolute_xyz: true
-      use_cluster_xyz: true
-      use_relative_xyz: true
-      num_filters: [32]
-
-    radar_vfe:
-      use_norm: true
-      with_distance: false
-      use_absolute_xyz: true
-      use_cluster_xyz: true
-      use_relative_xyz: true
-      num_filters: [32]
-
-    teacher_bev_backbone: &bev_backbone_cfg
-      layer_nums: [5, 5]
-      num_filters: [256, 256]
-      num_upsample_filters: [128, 128]
-      upsample_strides: [1, 2]
-
-    teacher_head: &head_cfg
+    class_names: &class_names ['car', 'truck', 'bus', 'trailer', 'other_vehicle', 'pedestrian', 'motorcycle', 'bicycle']
+    feature_key: feature
+    fusion_loss_weight: 1.0
+    lidar_feature_channels: 256
+    radar_feature_channels: 256
+    fusion_head: &head_cfg
       input_channels: 256
       shared_conv_channel: 64
       num_hm_conv: 2
-      predict_boxes_when_training: false
+      predict_boxes_when_training: true
       use_bias_before_norm: true
       iou_reg: DIoU
       rectifier: 0.5
@@ -123,24 +88,12 @@ model:
       separate_head_cfg:
         head_order: ['center', 'center_z', 'dim', 'rot', 'vel', 'iou']
         head_dict:
-          center:
-            out_channels: 2
-            num_conv: 2
-          center_z:
-            out_channels: 1
-            num_conv: 2
-          dim:
-            out_channels: 3
-            num_conv: 2
-          rot:
-            out_channels: 2
-            num_conv: 2
-          vel:
-            out_channels: 2
-            num_conv: 2
-          iou:
-            out_channels: 1
-            num_conv: 2
+          center: {out_channels: 2, num_conv: 2}
+          center_z: {out_channels: 1, num_conv: 2}
+          dim: {out_channels: 3, num_conv: 2}
+          rot: {out_channels: 2, num_conv: 2}
+          vel: {out_channels: 2, num_conv: 2}
+          iou: {out_channels: 1, num_conv: 2}
       loss_config:
         loss_weights:
           cls_weight: 1.0
@@ -155,11 +108,53 @@ model:
           nms_thresh: 0.2
           nms_pre_maxsize: 1000
           nms_post_maxsize: 83
-
-    radar_distill: *bev_backbone_cfg
-    radar_head:
-      <<: *head_cfg
-      predict_boxes_when_training: true
+    lidar_branch_args:
+      model_voxel_size: *model_voxel_size
+      model_lidar_range: *cav_lidar
+      voxel_size: *model_voxel_size
+      lidar_range: *cav_lidar
+      class_names: *class_names
+      feature_key: lidar_feature
+      lidar_num_point_features: 5
+      loss_weight: 1.0
+      lidar_vfe:
+        use_norm: true
+        with_distance: false
+        use_absolute_xyz: true
+        use_cluster_xyz: true
+        use_relative_xyz: true
+        num_filters: [32]
+      lidar_bev_backbone: &bev_backbone_cfg
+        layer_nums: [5, 5]
+        num_filters: [256, 256]
+        num_upsample_filters: [128, 128]
+        upsample_strides: [1, 2]
+      lidar_head:
+        <<: *head_cfg
+    radar_branch_args:
+      model_voxel_size: *model_voxel_size
+      model_lidar_range: *cav_lidar
+      voxel_size: *model_voxel_size
+      lidar_range: *cav_lidar
+      class_names: *class_names
+      feature_key: radar_feature
+      radar_num_point_features: 4
+      radar_loss_weight: 1.0
+      return_kd_motion_mask: false
+      radar_velocity_index: 4
+      min_motion_velocity: 0.2
+      motion_mask_kernel_size: 7
+      motion_mask_scale: 1.0
+      radar_vfe:
+        use_norm: true
+        with_distance: false
+        use_absolute_xyz: true
+        use_cluster_xyz: true
+        use_relative_xyz: true
+        num_filters: [32]
+      radar_bev_backbone: *bev_backbone_cfg
+      radar_head:
+        <<: *head_cfg
 
 loss:
   core_method: radardistill_loss
