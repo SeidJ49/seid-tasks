@@ -85,6 +85,11 @@ class PillarnetLidarTeacher(nn.Module):
         batch_dict = self._encode_lidar_to_bev(batch_dict)
         feature = batch_dict['spatial_features_2d']
         batch_dict = self.head(batch_dict)
+        prefix = self.prediction_key_prefix
+        raw_pred_dicts = [
+            {key: value for key, value in pred_dict.items()}
+            for pred_dict in batch_dict.get('lidar_pred_dicts', [])
+        ]
 
         if self.training or compute_loss:
             head_loss, head_tb = self.head.get_loss()
@@ -99,17 +104,20 @@ class PillarnetLidarTeacher(nn.Module):
                 'tb_dict': tb_dict,
                 'teacher_head_loss': head_loss,
                 self.feature_key: feature,
+                f'{prefix}pred_dicts': raw_pred_dicts,
+                f'{prefix}gt_boxes_for_kd': batch_dict['gt_boxes'],
                 'final_box_dict': self._select_final_box_dict(batch_dict),
             }
 
         output_dict = {
             self.feature_key: feature,
+            f'{prefix}pred_dicts': raw_pred_dicts,
+            f'{prefix}gt_boxes_for_kd': batch_dict['gt_boxes'],
             'final_box_dict': self._select_final_box_dict(batch_dict),
         }
 
         # Keep common PointPillars-style aliases when CenterHead internals expose
         # them. This makes downstream KD/debugging code more tolerant.
-        prefix = self.prediction_key_prefix
         if 'batch_cls_preds' in batch_dict:
             output_dict[f'{prefix}cls_preds'] = batch_dict['batch_cls_preds']
         if 'batch_box_preds' in batch_dict:

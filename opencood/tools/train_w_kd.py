@@ -26,6 +26,34 @@ def _format_state_key_report(keys, max_keys=20):
     return ", ".join(preview) + suffix
 
 
+def _load_student_checkpoint(model, checkpoint_path):
+    state_dict = torch.load(checkpoint_path, map_location='cpu')
+    if isinstance(state_dict, dict):
+        if 'state_dict' in state_dict:
+            state_dict = state_dict['state_dict']
+        elif 'model_state_dict' in state_dict:
+            state_dict = state_dict['model_state_dict']
+    state_dict = {
+        (k[7:] if isinstance(k, str) and k.startswith('module.') else k): v
+        for k, v in state_dict.items()
+    }
+    model_state_dict = model.state_dict()
+    compatible_state = {}
+    skipped = []
+    for key, value in state_dict.items():
+        if key in model_state_dict and value.shape == model_state_dict[key].shape:
+            compatible_state[key] = value
+        else:
+            skipped.append(key)
+    missing = [key for key in model_state_dict if key not in compatible_state]
+    model_state_dict.update(compatible_state)
+    model.load_state_dict(model_state_dict, strict=False)
+    print(f"[Fine-tune] initialized student from: {checkpoint_path}")
+    print(f"[Fine-tune] loaded tensors: {len(compatible_state)}")
+    print(f"[Fine-tune] skipped keys ({len(skipped)}): {_format_state_key_report(skipped)}")
+    print(f"[Fine-tune] missing keys ({len(missing)}): {_format_state_key_report(missing)}")
+
+
 def _load_teacher_state_dict(teacher_model, checkpoint_path, strict=False):
     teacher_state = torch.load(checkpoint_path, map_location='cpu')
     if isinstance(teacher_state, dict):
@@ -95,6 +123,28 @@ def main():
 
     # define the loss
     criterion = train_utils.create_loss(hypes)
+
+    train_params = hypes.get('train_params', {})
+    if not opt.model_dir:
+        pretrained_model_path = train_params.get('pretrained_model_path', '')
+        pretrained_model_dir = train_params.get('pretrained_model_dir', '')
+        pretrained_model_epoch = train_params.get('pretrained_model_epoch', None)
+        fine_tune = bool(train_params.get('fine_tune', False) or pretrained_model_path or pretrained_model_dir)
+        if pretrained_model_path:
+            _load_student_checkpoint(model, pretrained_model_path)
+        elif pretrained_model_dir:
+            _, model = train_utils.load_saved_model_epoch(
+                pretrained_model_dir, model, epoch=pretrained_model_epoch
+            )
+            print(
+                f"[Fine-tune] initialized student from dir: {pretrained_model_dir} "
+                f"epoch={pretrained_model_epoch if pretrained_model_epoch is not None else 'last'}"
+            )
+        if fine_tune:
+            print(
+                f"[Fine-tune] new run will train initialized weights for "
+                f"{train_params.get('epoches')} fine-tuning epochs. Do not pass --model_dir for this mode."
+            )
 
     # optimizer setup
     optimizer = train_utils.setup_optimizer(hypes, model)

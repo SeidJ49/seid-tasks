@@ -214,9 +214,15 @@ class PillarnetRadarStudentKdRcs(nn.Module):
             feature = feature * (1.0 + self.rcs_boost * rcs_confidence_mask)
             batch_dict['spatial_features_2d'] = feature
         batch_dict = self.head(batch_dict)
+        raw_pred_dicts = [
+            {key: value for key, value in pred_dict.items()}
+            for pred_dict in batch_dict.get('radar_pred_dicts', [])
+        ]
 
         output_dict = {
             self.feature_key: feature,
+            'radar_pred_dicts': raw_pred_dicts,
+            'gt_boxes_for_kd': batch_dict['gt_boxes'],
             'final_box_dict': batch_dict.get('final_box_dict', []),
         }
         if self.return_rcs_confidence_mask and rcs_confidence_mask is not None:
