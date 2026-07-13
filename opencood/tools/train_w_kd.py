@@ -258,6 +258,7 @@ def main():
                         'radardistill_loss',
                         'pillarnet_feature_kd_loss',
                         'pillarnet_feature_kd_scale_norm_loss',
+                        'pillarnet_feedback_kd_loss',
                     }:
                         # CenterHead/PillarNet normally skips target assignment
                         # in eval mode. Validation still needs output_dict['loss'].

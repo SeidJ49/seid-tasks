@@ -1,8 +1,8 @@
-name: lidar_reliability_stage3
+name: lidar_reliability_stage3_rain_vru
 
-root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_fog/trainval/test.pkl"
-validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_fog/trainval/test.pkl"
-test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_fog/trainval/test.pkl"
+root_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_rain/full_vulnerable_balanced/test.pkl"
+validate_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_rain/full_vulnerable_balanced/test.pkl"
+test_dir: "/home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_rain/full_vulnerable_balanced/test.pkl"
 
 ref_frame: 'ego_pose'
 
@@ -61,7 +61,6 @@ model:
     processed_lidar_key: processed_lidar
     unreliability:
       pool_kernel: 7
-      fixed_point_count_scale: 8.0
       point_count_percentile: 0.95
       min_point_count_scale: 1.0
       point_count_weight: 0.6
