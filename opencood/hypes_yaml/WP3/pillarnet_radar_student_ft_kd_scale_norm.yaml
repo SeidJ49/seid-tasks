@@ -165,7 +165,7 @@ loss:
       teacher_feature_key: teacher_feature
       motion_mask_key: kd_motion_mask
       use_motion_mask: true
-      mask_floor: 0.10
+      mask_floor: 0.0
       motion_boost: 2.0
       rcs_mask_key: rcs_confidence_mask
       use_rcs_mask: true

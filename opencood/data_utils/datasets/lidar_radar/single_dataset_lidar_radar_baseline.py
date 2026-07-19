@@ -578,17 +578,28 @@ class SingleDatasetLidarRadarBaseline(Dataset):
     def process_all_radar_velocity(self, radar_np, radar_transform, lidar_velocity_xyz, lidar_transform):
         radar_np = radar_np.copy()
 
+        l2r_transform = x1_to_x2(lidar_transform, radar_transform)
+        l2r_rotation_matrix = l2r_transform[:3, :3]
+        radar_velocity_xyz = np.dot(l2r_rotation_matrix, lidar_velocity_xyz)
+
         r = np.linalg.norm(radar_np[:, :3], axis=1)
         r_safe = np.where(r == 0, 1e-6, r)
         unit_vec = radar_np[:, :3] / r_safe[:, None]
 
         v_rel_vec = radar_np[:, 3:6]
-        v_rel = np.matmul(v_rel_vec, unit_vec.T).diagonal()
+        v_rel = np.einsum('ij,ij->i', v_rel_vec, unit_vec)
+        v_ego_radial = unit_vec @ radar_velocity_xyz
+        compensated_radial_velocity = v_rel + v_ego_radial
 
-        result_columns = [radar_np[:, 0], radar_np[:, 1], radar_np[:, 2], v_rel]
+        result_columns = [
+            radar_np[:, 0],
+            radar_np[:, 1],
+            radar_np[:, 2],
+            compensated_radial_velocity,
+        ]
         if radar_np.shape[1] > 6:
             # Preserve optional radar attributes such as RCS after replacing the
-            # velocity vector with scalar radial velocity.
+            # velocity vector with ego-compensated scalar radial velocity.
             result_columns.extend([radar_np[:, idx] for idx in range(6, radar_np.shape[1])])
         result_np = np.column_stack(result_columns)
         return result_np

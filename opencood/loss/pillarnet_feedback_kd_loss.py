@@ -158,9 +158,9 @@ class PillarnetFeedbackKdLoss(nn.Module):
                 obj_w = max(int(torch.ceil(box[3] / vx).item()), 1)
                 obj_h = max(int(torch.ceil(box[4] / vy).item()), 1)
                 x0 = max(cx - obj_w // 2, 0)
-                x1 = min(cx + (obj_w + 1) // 2 + 1, width)
+                x1 = min(cx + (obj_w + 1) // 2, width)
                 y0 = max(cy - obj_h // 2, 0)
-                y1 = min(cy + (obj_h + 1) // 2 + 1, height)
+                y1 = min(cy + (obj_h + 1) // 2, height)
                 if x1 <= x0 or y1 <= y0:
                     continue
                 area = max(float((x1 - x0) * (y1 - y0)), min_pixels)
@@ -231,7 +231,7 @@ class PillarnetFeedbackKdLoss(nn.Module):
         reg_weight = float(self.kd.get('instance_reg_weight', 0.0))
         if hm_weight <= 0.0 and reg_weight <= 0.0:
             zero = total_loss.new_tensor(0.0)
-            return zero, zero, zero
+            return zero, zero, zero, 0.0
 
         student_key = self.kd.get('student_pred_dicts_key', 'radar_pred_dicts')
         teacher_key = self.kd.get('teacher_pred_dicts_key', 'teacher_pred_dicts')
@@ -239,13 +239,16 @@ class PillarnetFeedbackKdLoss(nn.Module):
         teacher_preds = output_dict.get(teacher_key, [])
         if not student_preds or not teacher_preds or len(student_preds) != len(teacher_preds):
             zero = total_loss.new_tensor(0.0)
-            return zero, zero, zero
+            return zero, zero, zero, 0.0
 
         temperature = max(float(self.kd.get('temperature', 1.0)), 1e-6)
         threshold = float(self.kd.get('teacher_foreground_threshold', 0.10))
         reg_heads = self.kd.get('instance_reg_heads', ['center', 'center_z', 'dim', 'rot', 'vel', 'iou'])
+        mask_source = self.kd.get('instance_mask_source', 'teacher_foreground').lower()
+        use_kd_weight = bool(self.kd.get('instance_use_kd_weight_map', False))
         hm_losses = []
         reg_losses = []
+        mask_means = []
 
         for student_pred, teacher_pred in zip(student_preds, teacher_preds):
             if 'hm' not in student_pred or 'hm' not in teacher_pred:
@@ -265,7 +268,22 @@ class PillarnetFeedbackKdLoss(nn.Module):
             ) * (temperature ** 2)
             head_fg = torch.sigmoid(teacher_hm).max(dim=1, keepdim=True)[0]
             head_fg = ((head_fg - threshold) / max(1.0 - threshold, 1e-6)).clamp(0.0, 1.0)
-            head_weight = torch.maximum(head_fg, self._resize_mask(kd_weight_map, head_fg.shape[-2:]))
+
+            if mask_source in {'teacher_foreground', 'teacher_fg', 'heatmap'}:
+                head_weight = head_fg
+            elif mask_source in {'kd', 'kd_weight', 'feature_kd'}:
+                head_weight = self._resize_mask(kd_weight_map, head_fg.shape[-2:])
+            elif mask_source in {'hybrid', 'max'}:
+                head_weight = torch.maximum(head_fg, self._resize_mask(kd_weight_map, head_fg.shape[-2:]))
+            else:
+                raise ValueError(
+                    f"Unsupported instance_mask_source='{mask_source}'. "
+                    "Use teacher_foreground, kd, or hybrid."
+                )
+            if use_kd_weight and mask_source not in {'kd', 'kd_weight', 'feature_kd', 'hybrid', 'max'}:
+                head_weight = torch.maximum(head_weight, self._resize_mask(kd_weight_map, head_fg.shape[-2:]))
+            head_weight = head_weight.clamp(0.0, 1.0)
+            mask_means.append(head_weight.detach().mean())
             hm_losses.append(self._weighted_map_mean(hm_map.mean(dim=1, keepdim=True), head_weight))
 
             for head_name in reg_heads:
@@ -283,7 +301,8 @@ class PillarnetFeedbackKdLoss(nn.Module):
 
         hm_loss = torch.stack(hm_losses).mean() * hm_weight if hm_losses else total_loss.new_tensor(0.0)
         reg_loss = torch.stack(reg_losses).mean() * reg_weight if reg_losses else total_loss.new_tensor(0.0)
-        return hm_loss + reg_loss, hm_loss, reg_loss
+        mask_mean = torch.stack(mask_means).mean().item() if mask_means else 0.0
+        return hm_loss + reg_loss, hm_loss, reg_loss, mask_mean
 
     def forward(self, output_dict, target_dict, suffix=""):
         if 'loss' not in output_dict:
@@ -307,6 +326,7 @@ class PillarnetFeedbackKdLoss(nn.Module):
         instance_kd_loss = total_loss.new_tensor(0.0)
         instance_hm_loss = total_loss.new_tensor(0.0)
         instance_reg_loss = total_loss.new_tensor(0.0)
+        instance_mask_mean = 0.0
         kd_mask_mean = 1.0
         kd_weight_mean = 1.0
         teacher_fg_mean = 0.0
@@ -346,7 +366,7 @@ class PillarnetFeedbackKdLoss(nn.Module):
                 kd_loss = self._weighted_map_mean(kd_map, kd_weight_map) * kd_weight
                 total_loss = total_loss + kd_loss
 
-            instance_kd_loss, instance_hm_loss, instance_reg_loss = self._instance_distill_loss(
+            instance_kd_loss, instance_hm_loss, instance_reg_loss, instance_mask_mean = self._instance_distill_loss(
                 output_dict, kd_weight_map, total_loss
             )
             if instance_kd_loss.item() != 0.0:
@@ -382,6 +402,7 @@ class PillarnetFeedbackKdLoss(nn.Module):
             'instance_kd_loss': instance_kd_loss.item(),
             'instance_hm_loss': instance_hm_loss.item(),
             'instance_reg_loss': instance_reg_loss.item(),
+            'instance_mask_mean': instance_mask_mean,
             'kd_mask_mean': kd_mask_mean,
             'kd_weight_mean': kd_weight_mean,
             'teacher_fg_mean': teacher_fg_mean,
@@ -397,6 +418,7 @@ class PillarnetFeedbackKdLoss(nn.Module):
         kd_loss = self.loss_dict.get('kd_loss', 0.0)
         logit_kd_loss = self.loss_dict.get('logit_kd_loss', 0.0)
         instance_kd_loss = self.loss_dict.get('instance_kd_loss', 0.0)
+        instance_mask_mean = self.loss_dict.get('instance_mask_mean', 0.0)
         kd_mask_mean = self.loss_dict.get('kd_mask_mean', 0.0)
         kd_weight_mean = self.loss_dict.get('kd_weight_mean', 0.0)
         teacher_fg_mean = self.loss_dict.get('teacher_fg_mean', 0.0)
@@ -405,10 +427,10 @@ class PillarnetFeedbackKdLoss(nn.Module):
         teacher_rms = self.loss_dict.get('kd_raw_teacher_rms', 0.0)
         print(
             '[epoch %d][%d/%d]%s || Loss: %.4f || Radar Head: %.4f || KD: %.4f || '
-            'Inst KD: %.4f || Logit KD: %.4f || KD Mask: %.4f || KD Weight: %.4f || '
+            'Inst KD: %.4f || Inst Mask: %.4f || Logit KD: %.4f || KD Mask: %.4f || KD Weight: %.4f || '
             'Teacher FG: %.4f || Area W: %.4f || Raw RMS S/T: %.4f/%.4f'
             % (epoch, batch_id + 1, batch_len, suffix, total_loss, radar_head_loss, kd_loss,
-               instance_kd_loss, logit_kd_loss, kd_mask_mean, kd_weight_mean,
+               instance_kd_loss, instance_mask_mean, logit_kd_loss, kd_mask_mean, kd_weight_mean,
                teacher_fg_mean, area_weight_mean, student_rms, teacher_rms)
         )
         if writer is not None:
@@ -420,6 +442,7 @@ class PillarnetFeedbackKdLoss(nn.Module):
             writer.add_scalar('Instance_kd_loss' + suffix, instance_kd_loss, step)
             writer.add_scalar('Instance_hm_loss' + suffix, self.loss_dict.get('instance_hm_loss', 0.0), step)
             writer.add_scalar('Instance_reg_loss' + suffix, self.loss_dict.get('instance_reg_loss', 0.0), step)
+            writer.add_scalar('Instance_mask_mean' + suffix, instance_mask_mean, step)
             writer.add_scalar('Kd_mask_mean' + suffix, kd_mask_mean, step)
             writer.add_scalar('Kd_weight_mean' + suffix, kd_weight_mean, step)
             writer.add_scalar('Teacher_fg_mean' + suffix, teacher_fg_mean, step)
