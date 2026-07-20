@@ -76,6 +76,16 @@ def _load_teacher_state_dict(teacher_model, checkpoint_path, strict=False):
     return missing, unexpected
 
 
+def _merge_teacher_outputs(student_output, teacher_output):
+    """Merge only KD-facing teacher tensors without replacing student loss/results."""
+    blocked = {'loss', 'tb_dict', 'final_box_dict'}
+    for key, value in teacher_output.items():
+        if key in blocked or key.endswith('_head_loss'):
+            continue
+        if key == 'teacher_feature' or key.startswith('teacher_'):
+            student_output[key] = value
+
+
 def train_parser():
     parser = argparse.ArgumentParser(description="synthetic data generation")
     parser.add_argument("--hypes_yaml", "-y", type=str, required=True,
@@ -228,7 +238,7 @@ def main():
 
             if kd_flag:
                 teacher_output_dict = teacher_model(batch_data['ego'])
-                ouput_dict.update(teacher_output_dict)
+                _merge_teacher_outputs(ouput_dict, teacher_output_dict)
 
             final_loss = criterion(ouput_dict, batch_data['ego']['label_dict'])
             criterion.logging(epoch, i, len(train_loader), writer)
@@ -267,7 +277,7 @@ def main():
 
                     if kd_flag:
                         teacher_output_dict = teacher_model(batch_data['ego'])
-                        ouput_dict.update(teacher_output_dict)
+                        _merge_teacher_outputs(ouput_dict, teacher_output_dict)
 
                     final_loss = criterion(ouput_dict,
                                            batch_data['ego']['label_dict'])

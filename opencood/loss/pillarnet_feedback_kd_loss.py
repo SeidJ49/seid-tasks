@@ -69,6 +69,10 @@ class PillarnetFeedbackKdLoss(nn.Module):
             hm = torch.sigmoid(pred_dict['hm'].detach())
             hm = hm.max(dim=1, keepdim=True)[0]
             hm = ((hm - threshold) / max(1.0 - threshold, eps)).clamp(0.0, 1.0)
+            dilation = int(self.kd.get('teacher_foreground_dilation', 0))
+            if dilation > 1:
+                pad = dilation // 2
+                hm = F.max_pool2d(hm, kernel_size=dilation, stride=1, padding=pad)
             if target_hw is not None and hm.shape[-2:] != target_hw:
                 hm = self._resize_mask(hm, target_hw)
             masks.append(hm)
@@ -91,6 +95,93 @@ class PillarnetFeedbackKdLoss(nn.Module):
         min_val = flat.min(dim=1)[0].view(-1, 1, 1, 1)
         max_val = flat.max(dim=1)[0].view(-1, 1, 1, 1)
         return ((activation - min_val) / (max_val - min_val).clamp_min(eps)).clamp(0.0, 1.0)
+
+    def _box_grid_params(self):
+        voxel_size = self.kd.get('area_voxel_size', self.kd.get('voxel_size', [0.075, 0.075]))
+        lidar_range = self.kd.get('area_lidar_range', self.kd.get('lidar_range', [-54.0, -54.0, -5.0, 54.0, 54.0, 3.0]))
+        stride = float(self.kd.get('area_feature_map_stride', 8.0))
+        vx = float(voxel_size[0]) * stride
+        vy = float(voxel_size[1]) * stride
+        return vx, vy, float(lidar_range[0]), float(lidar_range[1])
+
+    def _box_to_axis_aligned_patch(self, box, height, width):
+        vx, vy, x_min, y_min = self._box_grid_params()
+        cx = int(torch.floor((box[0] - x_min) / vx).item())
+        cy = int(torch.floor((box[1] - y_min) / vy).item())
+        obj_w = max(int(torch.ceil(box[3] / vx).item()), 1)
+        obj_h = max(int(torch.ceil(box[4] / vy).item()), 1)
+        x0 = max(cx - obj_w // 2, 0)
+        x1 = min(cx + (obj_w + 1) // 2, width)
+        y0 = max(cy - obj_h // 2, 0)
+        y1 = min(cy + (obj_h + 1) // 2, height)
+        return x0, x1, y0, y1
+
+    def _gt_foreground_mask(self, output_dict, reference, target_hw):
+        gt_key = self.kd.get('gt_boxes_key', 'gt_boxes_for_kd')
+        gt_boxes = output_dict.get(gt_key, None)
+        if gt_boxes is None or gt_boxes.ndim != 3 or gt_boxes.shape[-1] < 8:
+            return None
+
+        gt_boxes = gt_boxes.detach()
+        batch_size = gt_boxes.shape[0]
+        height, width = int(target_hw[0]), int(target_hw[1])
+        mask = reference.new_zeros((batch_size, 1, height, width))
+        dilation = int(self.kd.get('gt_foreground_dilation', 0))
+        for batch_idx in range(batch_size):
+            for box in gt_boxes[batch_idx]:
+                if box[7] <= 0 or box[3] <= 0 or box[4] <= 0:
+                    continue
+                x0, x1, y0, y1 = self._box_to_axis_aligned_patch(box, height, width)
+                if x1 <= x0 or y1 <= y0:
+                    continue
+                if dilation > 0:
+                    x0 = max(x0 - dilation, 0)
+                    x1 = min(x1 + dilation, width)
+                    y0 = max(y0 - dilation, 0)
+                    y1 = min(y1 + dilation, height)
+                mask[batch_idx, 0, y0:y1, x0:x1] = 1.0
+        return mask if mask.sum() > 0 else None
+
+    def _gt_keypoint_mask(self, output_dict, reference, target_hw):
+        gt_key = self.kd.get('gt_boxes_key', 'gt_boxes_for_kd')
+        gt_boxes = output_dict.get(gt_key, None)
+        if gt_boxes is None or gt_boxes.ndim != 3 or gt_boxes.shape[-1] < 8:
+            return None
+
+        gt_boxes = gt_boxes.detach()
+        batch_size = gt_boxes.shape[0]
+        height, width = int(target_hw[0]), int(target_hw[1])
+        mask = reference.new_zeros((batch_size, 1, height, width))
+        radius = int(self.kd.get('instance_keypoint_radius', 1))
+        vx, vy, x_min, y_min = self._box_grid_params()
+        fractions = reference.new_tensor([
+            [0.0, 0.0],
+            [0.5, 0.0], [-0.5, 0.0], [0.0, 0.5], [0.0, -0.5],
+            [0.5, 0.5], [0.5, -0.5], [-0.5, 0.5], [-0.5, -0.5],
+        ])
+
+        for batch_idx in range(batch_size):
+            for box in gt_boxes[batch_idx]:
+                if box[7] <= 0 or box[3] <= 0 or box[4] <= 0:
+                    continue
+                yaw = box[6]
+                cos_yaw = torch.cos(yaw)
+                sin_yaw = torch.sin(yaw)
+                local_x = fractions[:, 0] * box[3]
+                local_y = fractions[:, 1] * box[4]
+                xs = box[0] + local_x * cos_yaw - local_y * sin_yaw
+                ys = box[1] + local_x * sin_yaw + local_y * cos_yaw
+                grid_x = torch.floor((xs - x_min) / vx).long()
+                grid_y = torch.floor((ys - y_min) / vy).long()
+                for gx, gy in zip(grid_x.tolist(), grid_y.tolist()):
+                    if gx < 0 or gx >= width or gy < 0 or gy >= height:
+                        continue
+                    x0 = max(gx - radius, 0)
+                    x1 = min(gx + radius + 1, width)
+                    y0 = max(gy - radius, 0)
+                    y1 = min(gy + radius + 1, height)
+                    mask[batch_idx, 0, y0:y1, x0:x1] = 1.0
+        return mask if mask.sum() > 0 else None
 
     def _teacher_foreground_mask(self, output_dict, target_hw):
         if not bool(self.kd.get('use_teacher_foreground_mask', False)):
@@ -137,37 +228,21 @@ class PillarnetFeedbackKdLoss(nn.Module):
         batch_size, _, _ = gt_boxes.shape
         height, width = int(target_hw[0]), int(target_hw[1])
         area_map = reference.new_full((batch_size, 1, height, width), float(self.kd.get('area_background_weight', 0.0)))
-        voxel_size = self.kd.get('area_voxel_size', self.kd.get('voxel_size', [0.075, 0.075]))
-        lidar_range = self.kd.get('area_lidar_range', self.kd.get('lidar_range', [-54.0, -54.0, -5.0, 54.0, 54.0, 3.0]))
-        stride = float(self.kd.get('area_feature_map_stride', 8.0))
         min_pixels = float(self.kd.get('area_min_pixels', 1.0))
         max_weight = float(self.kd.get('area_max_weight', 10.0))
-
-        vx = float(voxel_size[0]) * stride
-        vy = float(voxel_size[1]) * stride
-        x_min = float(lidar_range[0])
-        y_min = float(lidar_range[1])
 
         for batch_idx in range(batch_size):
             for box in gt_boxes[batch_idx]:
                 cls_id = box[7]
                 if cls_id <= 0 or box[3] <= 0 or box[4] <= 0:
                     continue
-                cx = int(torch.floor((box[0] - x_min) / vx).item())
-                cy = int(torch.floor((box[1] - y_min) / vy).item())
-                obj_w = max(int(torch.ceil(box[3] / vx).item()), 1)
-                obj_h = max(int(torch.ceil(box[4] / vy).item()), 1)
-                x0 = max(cx - obj_w // 2, 0)
-                x1 = min(cx + (obj_w + 1) // 2, width)
-                y0 = max(cy - obj_h // 2, 0)
-                y1 = min(cy + (obj_h + 1) // 2, height)
+                x0, x1, y0, y1 = self._box_to_axis_aligned_patch(box, height, width)
                 if x1 <= x0 or y1 <= y0:
                     continue
                 area = max(float((x1 - x0) * (y1 - y0)), min_pixels)
                 weight = min(1.0 / area, max_weight)
                 patch = area_map[batch_idx, 0, y0:y1, x0:x1]
                 area_map[batch_idx, 0, y0:y1, x0:x1] = torch.maximum(patch, patch.new_full(patch.shape, weight))
-
         if area_map.sum() <= 0:
             return None
         return area_map
@@ -187,6 +262,9 @@ class PillarnetFeedbackKdLoss(nn.Module):
             motion_mask = self._resize_mask(motion_mask, kd_map.shape[-2:])
 
         teacher_fg = self._teacher_foreground_mask(output_dict, kd_map.shape[-2:])
+        area_as_foreground = bool(self.kd.get('area_as_foreground', bool(self.kd.get('use_area_rebalance', False))))
+        use_gt_foreground = bool(self.kd.get('use_gt_foreground_mask', False)) or area_as_foreground
+        gt_fg = self._gt_foreground_mask(output_dict, kd_map, kd_map.shape[-2:]) if use_gt_foreground else None
 
         base_mask = motion_mask
         if use_hybrid_mask and teacher_fg is not None:
@@ -198,6 +276,15 @@ class PillarnetFeedbackKdLoss(nn.Module):
             else:
                 base_mask = torch.maximum(base_mask, teacher_component)
 
+        if gt_fg is not None:
+            gt_weight = float(self.kd.get('gt_foreground_weight', 1.0))
+            gt_component = (gt_fg * gt_weight).clamp(0.0, 1.0)
+            if base_mask is None:
+                base_mask = gt_component
+            elif self.kd.get('gt_foreground_mode', 'max').lower() == 'add':
+                base_mask = (base_mask + gt_component).clamp(0.0, 1.0)
+            else:
+                base_mask = torch.maximum(base_mask, gt_component)
         if base_mask is not None:
             kd_weight_map = base_mask * (1.0 - mask_floor) + mask_floor
             if motion_boost > 0.0 and motion_mask is not None:
@@ -250,11 +337,14 @@ class PillarnetFeedbackKdLoss(nn.Module):
         reg_losses = []
         mask_means = []
 
+        gt_keypoint_mask = None
         for student_pred, teacher_pred in zip(student_preds, teacher_preds):
             if 'hm' not in student_pred or 'hm' not in teacher_pred:
                 continue
             student_hm = student_pred['hm']
             teacher_hm = teacher_pred['hm'].detach()
+            if gt_keypoint_mask is None:
+                gt_keypoint_mask = self._gt_keypoint_mask(output_dict, student_hm, student_hm.shape[-2:])
             if student_hm.shape != teacher_hm.shape:
                 raise ValueError(
                     f"Instance heatmap KD shape mismatch: student {student_hm.shape}, "
@@ -271,14 +361,20 @@ class PillarnetFeedbackKdLoss(nn.Module):
 
             if mask_source in {'teacher_foreground', 'teacher_fg', 'heatmap'}:
                 head_weight = head_fg
+            elif mask_source in {'gt_keypoints', 'keypoints', 'instance_keypoints'}:
+                head_weight = self._resize_mask(gt_keypoint_mask, head_fg.shape[-2:]) if gt_keypoint_mask is not None else head_fg
+                if bool(self.kd.get('instance_combine_teacher_foreground', True)):
+                    head_weight = torch.maximum(head_weight, head_fg)
             elif mask_source in {'kd', 'kd_weight', 'feature_kd'}:
                 head_weight = self._resize_mask(kd_weight_map, head_fg.shape[-2:])
             elif mask_source in {'hybrid', 'max'}:
                 head_weight = torch.maximum(head_fg, self._resize_mask(kd_weight_map, head_fg.shape[-2:]))
+                if gt_keypoint_mask is not None:
+                    head_weight = torch.maximum(head_weight, self._resize_mask(gt_keypoint_mask, head_fg.shape[-2:]))
             else:
                 raise ValueError(
                     f"Unsupported instance_mask_source='{mask_source}'. "
-                    "Use teacher_foreground, kd, or hybrid."
+                    "Use teacher_foreground, gt_keypoints, kd, or hybrid."
                 )
             if use_kd_weight and mask_source not in {'kd', 'kd_weight', 'feature_kd', 'hybrid', 'max'}:
                 head_weight = torch.maximum(head_weight, self._resize_mask(kd_weight_map, head_fg.shape[-2:]))

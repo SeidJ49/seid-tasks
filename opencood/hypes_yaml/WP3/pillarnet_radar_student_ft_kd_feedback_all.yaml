@@ -176,7 +176,13 @@ loss:
       teacher_foreground_source: heatmap
       teacher_foreground_threshold: 0.10
       teacher_foreground_weight: 1.0
+      teacher_foreground_dilation: 7
+      use_gt_foreground_mask: true
+      gt_foreground_weight: 1.0
+      gt_foreground_mode: max
+      gt_foreground_dilation: 1
       use_area_rebalance: true
+      area_as_foreground: true
       gt_boxes_key: gt_boxes_for_kd
       area_voxel_size: *model_voxel_size
       area_lidar_range: *cav_lidar
@@ -189,7 +195,9 @@ loss:
       instance_hm_weight: 0.05
       instance_reg_weight: 0.02
       instance_reg_heads: ['center', 'center_z', 'dim', 'rot', 'vel', 'iou']
-      instance_mask_source: teacher_foreground
+      instance_mask_source: gt_keypoints
+      instance_keypoint_radius: 1
+      instance_combine_teacher_foreground: true
       instance_use_kd_weight_map: false
       logit_weight: 0.0
       temperature: 2.0

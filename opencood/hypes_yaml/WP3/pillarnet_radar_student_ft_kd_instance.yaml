@@ -159,7 +159,7 @@ loss:
     kd:
       weight: 0.0
       feature_loss: mse
-      feature_normalization: none
+      feature_normalization: channel_rms
       normalization_eps: 1.0e-6
       student_feature_key: feature
       teacher_feature_key: teacher_feature
@@ -172,14 +172,22 @@ loss:
       rcs_boost: 0.5
       use_hybrid_mask: false
       use_teacher_foreground_mask: false
+      teacher_foreground_dilation: 7
+      use_gt_foreground_mask: true
+      gt_foreground_weight: 1.0
+      gt_foreground_mode: max
+      gt_foreground_dilation: 1
       use_area_rebalance: false
+      area_as_foreground: false
       student_pred_dicts_key: radar_pred_dicts
       teacher_pred_dicts_key: teacher_pred_dicts
       teacher_foreground_threshold: 0.10
       instance_hm_weight: 0.05
       instance_reg_weight: 0.02
       instance_reg_heads: ['center', 'center_z', 'dim', 'rot', 'vel', 'iou']
-      instance_mask_source: teacher_foreground
+      instance_mask_source: gt_keypoints
+      instance_keypoint_radius: 1
+      instance_combine_teacher_foreground: true
       instance_use_kd_weight_map: false
       logit_weight: 0.0
       temperature: 2.0

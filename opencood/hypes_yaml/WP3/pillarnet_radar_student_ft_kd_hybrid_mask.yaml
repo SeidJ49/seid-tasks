@@ -159,7 +159,7 @@ loss:
     kd:
       weight: 0.1
       feature_loss: mse
-      feature_normalization: none
+      feature_normalization: channel_rms
       normalization_eps: 1.0e-6
       student_feature_key: feature
       teacher_feature_key: teacher_feature
@@ -176,9 +176,15 @@ loss:
       teacher_foreground_source: heatmap
       teacher_foreground_threshold: 0.10
       teacher_foreground_weight: 1.0
+      teacher_foreground_dilation: 7
+      use_gt_foreground_mask: true
+      gt_foreground_weight: 1.0
+      gt_foreground_mode: max
+      gt_foreground_dilation: 1
       student_pred_dicts_key: radar_pred_dicts
       teacher_pred_dicts_key: teacher_pred_dicts
       use_area_rebalance: false
+      area_as_foreground: false
       instance_hm_weight: 0.0
       instance_reg_weight: 0.0
       logit_weight: 0.0

@@ -159,7 +159,7 @@ loss:
     kd:
       weight: 0.1
       feature_loss: mse
-      feature_normalization: none
+      feature_normalization: channel_rms
       normalization_eps: 1.0e-6
       student_feature_key: feature
       teacher_feature_key: teacher_feature
@@ -172,7 +172,13 @@ loss:
       rcs_boost: 0.5
       use_hybrid_mask: false
       use_teacher_foreground_mask: false
+      teacher_foreground_dilation: 7
+      use_gt_foreground_mask: true
+      gt_foreground_weight: 1.0
+      gt_foreground_mode: max
+      gt_foreground_dilation: 1
       use_area_rebalance: true
+      area_as_foreground: true
       gt_boxes_key: gt_boxes_for_kd
       area_voxel_size: *model_voxel_size
       area_lidar_range: *cav_lidar

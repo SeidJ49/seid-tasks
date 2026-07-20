@@ -172,6 +172,12 @@ loss:
       rcs_boost: 0.5
       use_hybrid_mask: false
       use_teacher_foreground_mask: false
+      teacher_foreground_dilation: 7
+      use_gt_foreground_mask: false
+      gt_foreground_weight: 1.0
+      gt_foreground_mode: max
+      gt_foreground_dilation: 1
+      area_as_foreground: false
       use_area_rebalance: false
       student_pred_dicts_key: radar_pred_dicts
       teacher_pred_dicts_key: teacher_pred_dicts
