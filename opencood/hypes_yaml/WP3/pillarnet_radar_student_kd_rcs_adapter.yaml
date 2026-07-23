@@ -1,0 +1,231 @@
+name: pillarnet_radar_student_kd_rcs_adapter
+
+# Adjust paths on the server if needed.
+root_dir: /home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/pkls/local_paths/train.pkl
+validate_dir: /home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/pkls/local_paths/val.pkl
+test_dir: /home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/pkls/local_paths/test.pkl
+
+ref_frame: 'ego_pose'
+
+yaml_parser: "load_pillarnet_params"
+train_params:
+  batch_size: 8
+  epoches: 10
+  eval_freq: 1
+  save_freq: 1
+  grad_norm_clip: 10
+  num_workers: 8
+  pretrained_model_path: /home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_student_kd_rcs_boost0_2026_07_05_02_40_09/net_epoch20.pth
+  trainable_parameter_keywords: ['kd_feature_adapter']
+
+# True custom PillarNet student: raw radar_points + PillarNet dynamic VFE,
+# sparse PillarRes backbone, BEV neck, CenterHead, plus motion-aware KD.
+input_source: ['lidar']
+label_type: 'lidar'
+only_vis_ego: true
+
+fusion:
+  core_method: 'SingleDatasetLidarRadarBaseline'
+  dataset: 'v2xsim'
+  args: []
+
+preprocess:
+  core_method: 'SpVoxelPreprocessor'
+  args:
+    # Preprocess values are kept for dataset/postprocess compatibility. The
+    # model itself uses model_voxel_size/model_lidar_range below.
+    voxel_size: &pre_voxel_size [0.4, 0.4, 8]
+    max_points_per_voxel: 32
+    max_voxel_train: 32000
+    max_voxel_test: 70000
+    lidar_num_point_features: 4
+    radar_max_points_per_voxel: 8
+    radar_max_voxel_train: 12000
+    radar_max_voxel_test: 20000
+    radar_num_point_features: 5
+  cav_lidar_range: &cav_lidar [-54.0, -54.0, -5.0, 54.0, 54.0, 3.0]
+
+data_augment: []
+
+postprocess:
+  core_method: 'VoxelPostprocessor'
+  gt_range: *cav_lidar
+  filter_min_points_in_gt: 1
+  anchor_args:
+    cav_lidar_range: *cav_lidar
+    l: 3.9
+    w: 1.6
+    h: 1.56
+    r: [0, 90]
+    feature_stride: 2
+    num: 2
+  target_args:
+    pos_threshold: 0.6
+    neg_threshold: 0.45
+    score_threshold: 0.05
+  order: 'hwl'
+  max_num: 100
+  nms_thresh: 0.15
+
+model:
+  core_method: pillarnet_radar_student_kd_rcs
+  args:
+    model_voxel_size: &model_voxel_size [0.075, 0.075, 8]
+    model_lidar_range: *cav_lidar
+    voxel_size: *model_voxel_size
+    lidar_range: *cav_lidar
+    radar_num_point_features: 5
+    class_names: &class_names ['car', 'truck', 'bus', 'trailer', 'other_vehicle', 'pedestrian', 'motorcycle', 'bicycle']
+    radar_loss_weight: 1.0
+    feature_key: feature
+    use_kd_feature_adapter: true
+    adapted_feature_key: adapted_feature
+    kd_feature_adapter_channels: 256
+    return_kd_motion_mask: true
+    return_rcs_confidence_mask: true
+    use_rcs_branch: true
+    rcs_boost: 0.0
+    rcs_mask:
+      # Raw PillarNet radar_points are [batch_idx, x, y, z, radial_velocity, rcs].
+      # Use index 5 here; WP1 voxelized RCS configs use index 4 before collation.
+      index: 5
+      thresh: 0.0
+      mode: soft
+      temp: 1.0
+      reduce: max
+      kernel_size: 5
+      scale: 1.0
+    radar_velocity_index: 4
+    min_motion_velocity: 0.5
+    motion_mask_kernel_size: 5
+    motion_mask_scale: 1.0
+
+    radar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      use_cluster_xyz: true
+      use_relative_xyz: true
+      num_filters: [32]
+
+    radar_bev_backbone: &bev_backbone_cfg
+      layer_nums: [5, 5]
+      num_filters: [256, 256]
+      num_upsample_filters: [128, 128]
+      upsample_strides: [1, 2]
+
+    radar_head: &head_cfg
+      input_channels: 256
+      shared_conv_channel: 64
+      num_hm_conv: 2
+      predict_boxes_when_training: true
+      use_bias_before_norm: true
+      iou_reg: DIoU
+      rectifier: 0.5
+      class_names_each_head: [['car'], ['truck', 'other_vehicle'], ['bus', 'trailer'], ['pedestrian'], ['motorcycle', 'bicycle']]
+      target_assigner_config:
+        feature_map_stride: 8
+        num_max_objs: 500
+        gaussian_overlap: 0.1
+        min_radius: 2
+      separate_head_cfg:
+        head_order: ['center', 'center_z', 'dim', 'rot', 'vel', 'iou']
+        head_dict:
+          center:
+            out_channels: 2
+            num_conv: 2
+          center_z:
+            out_channels: 1
+            num_conv: 2
+          dim:
+            out_channels: 3
+            num_conv: 2
+          rot:
+            out_channels: 2
+            num_conv: 2
+          vel:
+            out_channels: 2
+            num_conv: 2
+          iou:
+            out_channels: 1
+            num_conv: 2
+      loss_config:
+        loss_weights:
+          cls_weight: 1.0
+          loc_weight: 0.25
+          iou_weight: 1.0
+          code_weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2, 1.0, 1.0]
+      post_processing:
+        score_thresh: 0.03
+        max_obj_per_sample: 500
+        post_center_limit_range: [-61.2, -61.2, -10.0, 61.2, 61.2, 10.0]
+        nms_config:
+          nms_thresh: 0.2
+          nms_pre_maxsize: 2000
+          nms_post_maxsize: 200
+
+loss:
+  core_method: pillarnet_feature_kd_loss
+  args:
+    kd:
+      weight: 0.1 # Tune this
+      feature_loss: mse
+      student_feature_key: adapted_feature
+      teacher_feature_key: teacher_feature
+      motion_mask_key: kd_motion_mask
+      use_motion_mask: true
+      mask_floor: 0.10
+      motion_boost: 2.0
+      rcs_mask_key: rcs_confidence_mask
+      use_rcs_mask: true
+      rcs_boost: 0.5
+      # CenterHead logits are multi-head dicts, so keep logit KD off for now.
+      logit_weight: 0.0
+      temperature: 2.0
+
+optimizer:
+  core_method: adam_onecycle
+  lr: 0.001
+  args:
+    betas: [0.9, 0.99]
+    weight_decay: 0.01
+
+lr_scheduler:
+  core_method: onecycle
+  max_lr: 0.001
+  moms: [0.95, 0.85]
+  pct_start: 0.4
+  div_factor: 10
+  final_div_factor: 10000
+  anneal_strategy: cos
+  gamma: 0.1
+
+kd_flag:
+  teacher_model: pillarnet_lidar_teacher
+  teacher_model_config:
+    model_voxel_size: *model_voxel_size
+    model_lidar_range: *cav_lidar
+    voxel_size: *model_voxel_size
+    lidar_range: *cav_lidar
+    lidar_num_point_features: 5
+    class_names: *class_names
+    teacher_loss_weight: 1.0
+    prediction_key_prefix: 'teacher_'
+    feature_key: teacher_feature
+
+    lidar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      use_cluster_xyz: true
+      use_relative_xyz: true
+      num_filters: [32]
+
+    teacher_bev_backbone: *bev_backbone_cfg
+
+    teacher_head:
+      <<: *head_cfg
+      predict_boxes_when_training: false
+
+  teacher_path: "/home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_lidar_teacher_2026_07_02_15_24_24/net_epoch11.pth"
+  strict_teacher_load: true
