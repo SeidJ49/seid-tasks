@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import g2o
-from icecream import ic
+# from icecream import ic
 import copy
 import os
 import matplotlib.pyplot as plt
@@ -275,7 +275,7 @@ def box_alignment_relative_sample_np(
 
         DEBUG = False
         if DEBUG:
-            from icecream import ic
+            # from icecream import ic
             ic(cluster_dict[cluster_id]['box_idx'])
             ic(cluster_dict[cluster_id]['box_center_world'])
             ic(cluster_dict[cluster_id]['box_yaw'])

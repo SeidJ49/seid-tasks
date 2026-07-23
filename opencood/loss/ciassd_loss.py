@@ -4,7 +4,7 @@ import numpy as np
 from opencood.utils.common_utils import limit_period
 from opencood.data_utils.post_processor.voxel_postprocessor import VoxelPostprocessor
 from opencood.pcdet_utils.iou3d_nms.iou3d_nms_utils import aligned_boxes_iou3d_gpu
-from icecream import ic
+# from icecream import ic
 
 class CiassdLoss(nn.Module):
     def __init__(self, args, keyname='stage1_out'):

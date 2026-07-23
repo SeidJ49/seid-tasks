@@ -548,7 +548,7 @@ def project_world_objects_v2x(object_dict,
 
     output_dict: [x,y,z, lwh or hwl, yaw] 
     """
-    from icecream import ic
+    # from icecream import ic
     gt_boxes = object_dict['gt_boxes']
     object_ids = object_dict['object_ids']
     for i, object_content in enumerate(gt_boxes):

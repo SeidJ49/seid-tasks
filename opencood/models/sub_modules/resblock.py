@@ -367,6 +367,6 @@ if __name__=="__main__":
     model = ResNetModified(BasicBlock, [3,4,5])
     input = torch.randn(4,64,200,704)
     output = model(input)
-    from icecream import ic
+    # from icecream import ic
     for out in output:
         ic(out.shape)

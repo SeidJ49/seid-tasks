@@ -4,7 +4,7 @@ import numpy as np
 from spconv.modules import SparseModule
 from opencood.utils.box_utils import project_points_by_matrix_torch
 from torch_scatter import scatter
-from icecream import ic 
+# from icecream import ic 
 
 class RemoveDuplicate(SparseModule):
     """

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from opencood.pcdet_utils.pointnet2.pointnet2_stack import voxel_query_utils
 from typing import List
-from icecream import ic
+# from icecream import ic
 
 class NeighborVoxelSAModuleMSG(nn.Module):
                  

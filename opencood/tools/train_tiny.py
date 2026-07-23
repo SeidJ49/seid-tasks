@@ -15,7 +15,7 @@ import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.tools import train_utils
 from opencood.data_utils.datasets import build_dataset
 
-from icecream import ic
+# from icecream import ic
 
 
 def train_parser():

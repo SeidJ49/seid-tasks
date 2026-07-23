@@ -1,8 +1,8 @@
 name: pillarnet_radar_student_ft_kd_feedback_all
 
-root_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/full_vulnerable_balanced/train_vru_oversampled.pkl
-validate_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/full_vulnerable_balanced/val.pkl
-test_dir: /home/ws-ids-es3-01/PycharmProjects/Datasets/DatasetTruckscences_clear/full_vulnerable_balanced/test.pkl
+root_dir: /home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/pkls/local_paths/train.pkl
+validate_dir: /home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/pkls/local_paths/val.pkl
+test_dir: /home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/pkls/local_paths/test.pkl
 
 ref_frame: 'ego_pose'
 
@@ -14,7 +14,7 @@ train_params:
   save_freq: 1
   grad_norm_clip: 10
   fine_tune: true
-  pretrained_model_path: /home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/pillarnet_radar_student_kd_rcs_boost0_2026_07_05_02_40_09/best_only/clear_full_vulnerable_balanced/net_epoch20.pth
+  pretrained_model_path: /home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_student_kd_rcs_boost0_2026_07_05_02_40_09/net_epoch20.pth
 
 input_source: ['lidar']
 label_type: 'lidar'
@@ -246,5 +246,5 @@ kd_flag:
       <<: *head_cfg
       predict_boxes_when_training: false
 
-  teacher_path: "/home/ws-ids-es3-01/repo/jadadic_bm2cp/opencood/logs/pillarnet_lidar_teacher_2026_07_02_15_24_24/best_only/clear_full_vulnerable_balanced/net_epoch22.pth"
+  teacher_path: "/home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_lidar_teacher_2026_07_02_15_24_24/net_epoch22.pth"
   strict_teacher_load: true

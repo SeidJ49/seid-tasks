@@ -10,7 +10,7 @@ Transformation utils
 from re import X
 import numpy as np
 import torch
-from icecream import ic
+# from icecream import ic
 from pyquaternion import Quaternion
 from opencood.utils.common_utils import check_numpy_to_torch
 

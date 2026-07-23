@@ -18,6 +18,10 @@ class PillarnetFeedbackKdLoss(nn.Module):
         self.loss_dict = {}
 
     @staticmethod
+    def _sum_loss_prefix(loss_dict, prefix):
+        return sum(value for key, value in loss_dict.items() if key.startswith(prefix))
+
+    @staticmethod
     def _channel_rms(feature, eps):
         return feature.pow(2).mean(dim=(-2, -1), keepdim=True).add(eps).sqrt()
 
@@ -511,6 +515,10 @@ class PillarnetFeedbackKdLoss(nn.Module):
     def logging(self, epoch, batch_id, batch_len, writer=None, suffix=""):
         total_loss = self.loss_dict.get('total_loss', 0.0)
         radar_head_loss = self.loss_dict.get('radar_head_loss', self.loss_dict.get('rpn_loss', 0.0))
+        center_hm_loss = self._sum_loss_prefix(self.loss_dict, 'hm_loss_head_')
+        center_loc_loss = self._sum_loss_prefix(self.loss_dict, 'loc_loss_head_')
+        center_iou_loss = self._sum_loss_prefix(self.loss_dict, 'iou_loss_head_')
+        center_iou_reg_loss = self._sum_loss_prefix(self.loss_dict, 'iou_reg_loss_head_')
         kd_loss = self.loss_dict.get('kd_loss', 0.0)
         logit_kd_loss = self.loss_dict.get('logit_kd_loss', 0.0)
         instance_kd_loss = self.loss_dict.get('instance_kd_loss', 0.0)
@@ -522,10 +530,12 @@ class PillarnetFeedbackKdLoss(nn.Module):
         student_rms = self.loss_dict.get('kd_raw_student_rms', 0.0)
         teacher_rms = self.loss_dict.get('kd_raw_teacher_rms', 0.0)
         print(
-            '[epoch %d][%d/%d]%s || Loss: %.4f || Radar Head: %.4f || KD: %.4f || '
-            'Inst KD: %.4f || Inst Mask: %.4f || Logit KD: %.4f || KD Mask: %.4f || KD Weight: %.4f || '
+            '[epoch %d][%d/%d]%s || Loss: %.4f || Radar Head: %.4f || HM: %.4f || Loc: %.4f || '
+            'IoU: %.4f || IoU Reg: %.4f || KD: %.4f || Inst KD: %.4f || Inst Mask: %.4f || '
+            'Logit KD: %.4f || KD Mask: %.4f || KD Weight: %.4f || '
             'Teacher FG: %.4f || Area W: %.4f || Raw RMS S/T: %.4f/%.4f'
-            % (epoch, batch_id + 1, batch_len, suffix, total_loss, radar_head_loss, kd_loss,
+            % (epoch, batch_id + 1, batch_len, suffix, total_loss, radar_head_loss,
+               center_hm_loss, center_loc_loss, center_iou_loss, center_iou_reg_loss, kd_loss,
                instance_kd_loss, instance_mask_mean, logit_kd_loss, kd_mask_mean, kd_weight_mean,
                teacher_fg_mean, area_weight_mean, student_rms, teacher_rms)
         )
@@ -533,6 +543,10 @@ class PillarnetFeedbackKdLoss(nn.Module):
             step = epoch * batch_len + batch_id
             writer.add_scalar('Total_loss' + suffix, total_loss, step)
             writer.add_scalar('Radar_head_loss' + suffix, radar_head_loss, step)
+            writer.add_scalar('Center_hm_loss' + suffix, center_hm_loss, step)
+            writer.add_scalar('Center_loc_loss' + suffix, center_loc_loss, step)
+            writer.add_scalar('Center_iou_loss' + suffix, center_iou_loss, step)
+            writer.add_scalar('Center_iou_reg_loss' + suffix, center_iou_reg_loss, step)
             writer.add_scalar('Kd_loss' + suffix, kd_loss, step)
             writer.add_scalar('Logit_kd_loss' + suffix, logit_kd_loss, step)
             writer.add_scalar('Instance_kd_loss' + suffix, instance_kd_loss, step)

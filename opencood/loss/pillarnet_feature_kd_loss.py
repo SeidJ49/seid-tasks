@@ -16,6 +16,10 @@ class PillarnetFeatureKdLoss(nn.Module):
         self.kd = args.get('kd', {})
         self.loss_dict = {}
 
+    @staticmethod
+    def _sum_loss_prefix(loss_dict, prefix):
+        return sum(value for key, value in loss_dict.items() if key.startswith(prefix))
+
     def forward(self, output_dict, target_dict, suffix=""):
         if 'loss' not in output_dict:
             raise KeyError(
@@ -125,18 +129,29 @@ class PillarnetFeatureKdLoss(nn.Module):
     def logging(self, epoch, batch_id, batch_len, writer=None, suffix=""):
         total_loss = self.loss_dict.get('total_loss', 0.0)
         radar_head_loss = self.loss_dict.get('radar_head_loss', self.loss_dict.get('rpn_loss', 0.0))
+        center_hm_loss = self._sum_loss_prefix(self.loss_dict, 'hm_loss_head_')
+        center_loc_loss = self._sum_loss_prefix(self.loss_dict, 'loc_loss_head_')
+        center_iou_loss = self._sum_loss_prefix(self.loss_dict, 'iou_loss_head_')
+        center_iou_reg_loss = self._sum_loss_prefix(self.loss_dict, 'iou_reg_loss_head_')
         kd_loss = self.loss_dict.get('kd_loss', 0.0)
         logit_kd_loss = self.loss_dict.get('logit_kd_loss', 0.0)
         kd_mask_mean = self.loss_dict.get('kd_mask_mean', 0.0)
         kd_weight_mean = self.loss_dict.get('kd_weight_mean', 0.0)
         print(
-            '[epoch %d][%d/%d]%s || Loss: %.4f || Radar Head: %.4f || KD: %.4f || Logit KD: %.4f || KD Mask: %.4f || KD Weight: %.4f'
-            % (epoch, batch_id + 1, batch_len, suffix, total_loss, radar_head_loss, kd_loss, logit_kd_loss, kd_mask_mean, kd_weight_mean)
+            '[epoch %d][%d/%d]%s || Loss: %.4f || Radar Head: %.4f || HM: %.4f || Loc: %.4f || '
+            'IoU: %.4f || IoU Reg: %.4f || KD: %.4f || Logit KD: %.4f || KD Mask: %.4f || KD Weight: %.4f'
+            % (epoch, batch_id + 1, batch_len, suffix, total_loss, radar_head_loss,
+               center_hm_loss, center_loc_loss, center_iou_loss, center_iou_reg_loss,
+               kd_loss, logit_kd_loss, kd_mask_mean, kd_weight_mean)
         )
         if writer is not None:
             step = epoch * batch_len + batch_id
             writer.add_scalar('Total_loss' + suffix, total_loss, step)
             writer.add_scalar('Radar_head_loss' + suffix, radar_head_loss, step)
+            writer.add_scalar('Center_hm_loss' + suffix, center_hm_loss, step)
+            writer.add_scalar('Center_loc_loss' + suffix, center_loc_loss, step)
+            writer.add_scalar('Center_iou_loss' + suffix, center_iou_loss, step)
+            writer.add_scalar('Center_iou_reg_loss' + suffix, center_iou_reg_loss, step)
             writer.add_scalar('Kd_loss' + suffix, kd_loss, step)
             writer.add_scalar('Logit_kd_loss' + suffix, logit_kd_loss, step)
             writer.add_scalar('Kd_mask_mean' + suffix, kd_mask_mean, step)

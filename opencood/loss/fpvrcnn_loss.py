@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import numpy as np
 from opencood.loss.ciassd_loss import CiassdLoss, weighted_smooth_l1_loss
-from icecream import ic 
+# from icecream import ic 
 
 class FpvrcnnLoss(nn.Module):
     def __init__(self, args):

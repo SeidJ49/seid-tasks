@@ -5,7 +5,7 @@ from opencood.pcdet_utils.pointnet2.pointnet2_stack import voxel_pool_modules as
 from opencood.utils import common_utils
 from opencood.pcdet_utils.iou3d_nms.iou3d_nms_utils import boxes_iou3d_gpu
 from opencood.utils import box_utils
-from icecream import ic
+# from icecream import ic
 from copy import deepcopy
 
 class VoxelRCNNHead(nn.Module):

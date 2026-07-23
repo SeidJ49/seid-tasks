@@ -14,7 +14,7 @@ import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.tools import train_utils
 from opencood.data_utils.datasets import build_dataset
 import glob
-from icecream import ic
+# from icecream import ic
 
 
 def _format_state_key_report(keys, max_keys=20):
@@ -86,6 +86,28 @@ def _merge_teacher_outputs(student_output, teacher_output):
             student_output[key] = value
 
 
+def _apply_trainable_parameter_filter(model, train_params):
+    trainable_keywords = train_params.get('trainable_parameter_keywords', [])
+    if not trainable_keywords:
+        return
+    if isinstance(trainable_keywords, str):
+        trainable_keywords = [trainable_keywords]
+
+    trainable_count = 0
+    frozen_count = 0
+    for name, parameter in model.named_parameters():
+        trainable = any(keyword in name for keyword in trainable_keywords)
+        parameter.requires_grad_(trainable)
+        if trainable:
+            trainable_count += parameter.numel()
+        else:
+            frozen_count += parameter.numel()
+    print(
+        f"[Fine-tune] trainable parameter keywords: {trainable_keywords}; "
+        f"trainable={trainable_count}, frozen={frozen_count}"
+    )
+
+
 def train_parser():
     parser = argparse.ArgumentParser(description="synthetic data generation")
     parser.add_argument("--hypes_yaml", "-y", type=str, required=True,
@@ -155,6 +177,7 @@ def main():
                 f"[Fine-tune] new run will train initialized weights for "
                 f"{train_params.get('epoches')} fine-tuning epochs. Do not pass --model_dir for this mode."
             )
+        _apply_trainable_parameter_filter(model, train_params)
 
     # optimizer setup
     optimizer = train_utils.setup_optimizer(hypes, model)
