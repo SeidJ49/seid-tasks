@@ -1,4 +1,4 @@
-name: pillarnet_radar_student_kd_rcs_adapter_histmask
+name: pillarnet_radar_student_kd_rcs_adapter_gtmask
 
 # Adjust paths on the server if needed.
 root_dir: /home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/pkls/local_paths/train.pkl
@@ -82,6 +82,11 @@ model:
     adapted_feature_key: adapted_feature
     use_adapted_feature_for_head: false
     kd_feature_adapter_channels: 256
+    gt_foreground_mask:
+      enabled: true
+      key: gt_foreground_mask
+      kernel_size: 3
+      scale: 1.0
     return_kd_motion_mask: true
     return_rcs_confidence_mask: true
     use_rcs_branch: true
@@ -187,7 +192,7 @@ loss:
       feature_loss: mse
       student_feature_key: adapted_feature
       teacher_feature_key: teacher_feature
-      motion_mask_key: radar_evidence_mask
+      motion_mask_key: gt_foreground_mask
       use_motion_mask: true
       mask_floor: 0.10
       motion_boost: 1.0

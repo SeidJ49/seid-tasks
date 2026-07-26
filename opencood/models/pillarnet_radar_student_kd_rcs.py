@@ -36,6 +36,7 @@ class PillarnetRadarStudentKdRcs(nn.Module):
         self.feature_key = args.get('feature_key', 'feature')
         self.use_kd_feature_adapter = bool(args.get('use_kd_feature_adapter', False))
         self.adapted_feature_key = args.get('adapted_feature_key', 'adapted_feature')
+        self.use_adapted_feature_for_head = bool(args.get('use_adapted_feature_for_head', False))
         self.return_kd_motion_mask = args.get('return_kd_motion_mask', True)
         self.motion_mask_kernel_size = int(args.get('motion_mask_kernel_size', 7))
         self.motion_mask_scale = float(args.get('motion_mask_scale', 1.0))
@@ -69,6 +70,12 @@ class PillarnetRadarStudentKdRcs(nn.Module):
         self.evidence_reduce = evidence_cfg.get('reduce', 'max')
         self.evidence_kernel_size = int(evidence_cfg.get('kernel_size', 5))
         self.evidence_scale = float(evidence_cfg.get('scale', 1.0))
+
+        gt_mask_cfg = args.get('gt_foreground_mask', {})
+        self.use_gt_foreground_mask = bool(gt_mask_cfg.get('enabled', False))
+        self.gt_foreground_mask_key = gt_mask_cfg.get('key', 'gt_foreground_mask')
+        self.gt_foreground_mask_kernel_size = int(gt_mask_cfg.get('kernel_size', 1))
+        self.gt_foreground_mask_scale = float(gt_mask_cfg.get('scale', 1.0))
 
         self.radar_vfe = RadarDynamicPillarVFESimple2D(
             args['radar_vfe'],
@@ -289,6 +296,49 @@ class PillarnetRadarStudentKdRcs(nn.Module):
             mask = (mask * self.evidence_scale).clamp_(0.0, 1.0)
         return mask
 
+    def _build_gt_foreground_mask(self, gt_boxes, target_hw):
+        if not self.use_gt_foreground_mask:
+            return None
+
+        batch_size = gt_boxes.shape[0]
+        target_h, target_w = int(target_hw[0]), int(target_hw[1])
+        device = gt_boxes.device
+        dtype = gt_boxes.dtype
+        mask = gt_boxes.new_zeros((batch_size, 1, target_h, target_w))
+
+        xs = (
+            torch.arange(target_w, device=device, dtype=dtype) + 0.5
+        ) * (self.point_cloud_range[3] - self.point_cloud_range[0]) / target_w + self.point_cloud_range[0]
+        ys = (
+            torch.arange(target_h, device=device, dtype=dtype) + 0.5
+        ) * (self.point_cloud_range[4] - self.point_cloud_range[1]) / target_h + self.point_cloud_range[1]
+        yy, xx = torch.meshgrid(ys, xs, indexing='ij')
+
+        for batch_idx in range(batch_size):
+            valid = gt_boxes[batch_idx, :, -1] > 0
+            cur_boxes = gt_boxes[batch_idx, valid]
+            for box in cur_boxes:
+                cx, cy = box[0], box[1]
+                dx = box[3].clamp_min(1e-3)
+                dy = box[4].clamp_min(1e-3)
+                yaw = box[6]
+                rel_x = xx - cx
+                rel_y = yy - cy
+                cos_yaw = torch.cos(-yaw)
+                sin_yaw = torch.sin(-yaw)
+                local_x = rel_x * cos_yaw - rel_y * sin_yaw
+                local_y = rel_x * sin_yaw + rel_y * cos_yaw
+                inside = (local_x.abs() <= dx * 0.5) & (local_y.abs() <= dy * 0.5)
+                mask[batch_idx, 0] = torch.maximum(mask[batch_idx, 0], inside.to(dtype))
+
+        if self.gt_foreground_mask_kernel_size > 1:
+            pad = self.gt_foreground_mask_kernel_size // 2
+            mask = F.max_pool2d(mask, self.gt_foreground_mask_kernel_size, stride=1, padding=pad)
+        mask = mask.clamp_(0.0, 1.0)
+        if self.gt_foreground_mask_scale != 1.0:
+            mask = (mask * self.gt_foreground_mask_scale).clamp_(0.0, 1.0)
+        return mask
+
     def _encode_radar_to_bev(self, batch_dict):
         batch_dict = self.radar_vfe(batch_dict)
         batch_dict = self.backbone(batch_dict)
@@ -314,6 +364,11 @@ class PillarnetRadarStudentKdRcs(nn.Module):
         if rcs_confidence_mask is not None and self.rcs_boost != 0.0:
             feature = feature * (1.0 + self.rcs_boost * rcs_confidence_mask)
             batch_dict['spatial_features_2d'] = feature
+        adapted_feature = None
+        if self.kd_feature_adapter is not None:
+            adapted_feature = self.kd_feature_adapter(feature)
+            if self.use_adapted_feature_for_head:
+                batch_dict['spatial_features_2d'] = adapted_feature
         batch_dict = self.head(batch_dict)
         raw_pred_dicts = [
             {key: value for key, value in pred_dict.items()}
@@ -326,13 +381,17 @@ class PillarnetRadarStudentKdRcs(nn.Module):
             'gt_boxes_for_kd': batch_dict['gt_boxes'],
             'final_box_dict': batch_dict.get('final_box_dict', []),
         }
-        if self.kd_feature_adapter is not None:
-            output_dict[self.adapted_feature_key] = self.kd_feature_adapter(feature)
+        if adapted_feature is not None:
+            output_dict[self.adapted_feature_key] = adapted_feature
+            output_dict['detector_feature_key'] = self.adapted_feature_key if self.use_adapted_feature_for_head else self.feature_key
         if self.return_rcs_confidence_mask and rcs_confidence_mask is not None:
             output_dict['rcs_confidence_mask'] = rcs_confidence_mask
         radar_evidence_mask = self._build_radar_evidence_mask(data_dict['radar_points'], batch_size, feature.shape[-2:])
         if radar_evidence_mask is not None:
             output_dict[self.radar_evidence_mask_key] = radar_evidence_mask
+        gt_foreground_mask = self._build_gt_foreground_mask(batch_dict['gt_boxes'], feature.shape[-2:])
+        if gt_foreground_mask is not None:
+            output_dict[self.gt_foreground_mask_key] = gt_foreground_mask
         if self.return_kd_motion_mask:
             kd_motion_mask = self._build_motion_mask(data_dict['radar_points'], batch_size, feature.shape[-2:])
             if kd_motion_mask is not None:
