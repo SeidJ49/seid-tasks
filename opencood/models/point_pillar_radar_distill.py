@@ -5,7 +5,11 @@ from opencood.models.sub_modules.radardistill_bev_backbone import BaseBEVBackbon
 from opencood.models.sub_modules.radardistill_block import RadarDistill
 from opencood.models.sub_modules.radardistill_head import CenterHead, RadarCenterHead
 from opencood.models.sub_modules.radardistill_spconv_backbone import PillarRes18BackBone8x, RadarPillarRes18BackBone8x
-from opencood.models.sub_modules.radardistill_vfe import DynamicPillarVFESimple2D, RadarDynamicPillarVFESimple2D
+from opencood.models.sub_modules.radardistill_vfe import (
+    DynamicPillarVFESimple2D,
+    FactorizedRadarDynamicPillarVFE,
+    RadarDynamicPillarVFESimple2D,
+)
 
 
 class PointPillarRadarDistill(nn.Module):
@@ -33,8 +37,11 @@ class PointPillarRadarDistill(nn.Module):
             grid_size=self.grid_size,
             point_cloud_range=self.point_cloud_range,
         )
-        self.radar_vfe = RadarDynamicPillarVFESimple2D(
-            args['radar_vfe'],
+        radar_vfe_cfg = args['radar_vfe']
+        radar_vfe_type = radar_vfe_cfg.get('type', 'dynamic_pillar')
+        radar_vfe_cls = FactorizedRadarDynamicPillarVFE if radar_vfe_type == 'factorized' else RadarDynamicPillarVFESimple2D
+        self.radar_vfe = radar_vfe_cls(
+            radar_vfe_cfg,
             num_point_features=args['radar_num_point_features'],
             voxel_size=self.voxel_size,
             grid_size=self.grid_size,
@@ -51,7 +58,11 @@ class PointPillarRadarDistill(nn.Module):
             voxel_size=self.voxel_size,
         )
         self.radar_backbone = RadarPillarRes18BackBone8x(self.grid_size)
-        self.radar_distill = RadarDistill(args['radar_distill'])
+        radar_distill_cfg = dict(args['radar_distill'])
+        radar_distill_cfg.setdefault('point_cloud_range', self.point_cloud_range)
+        radar_distill_cfg.setdefault('voxel_size', self.voxel_size)
+        radar_distill_cfg.setdefault('grid_size', self.grid_size)
+        self.radar_distill = RadarDistill(radar_distill_cfg)
         self.radar_head = RadarCenterHead(
             args['radar_head'],
             input_channels=args['radar_head']['input_channels'],
@@ -193,10 +204,16 @@ class PointPillarRadarDistill(nn.Module):
             radar_head_loss, radar_tb = self.radar_head.get_loss()
             distill_loss, distill_tb = self.radar_distill.get_loss(batch_dict)
             total_loss = self.radar_loss_weight * radar_head_loss + self.distill_loss_weight * distill_loss
-            tb_dict = {'total_loss': total_loss.item(), **radar_tb, **distill_tb}
+            tb_dict = {
+                'total_loss': total_loss.item(),
+                'radar_head_loss': radar_head_loss.item(),
+                **radar_tb,
+                **distill_tb,
+            }
             output_dict = {
                 'loss': total_loss,
                 'tb_dict': tb_dict,
+                'debug_maps': getattr(self.radar_distill, 'debug_maps', {}),
                 'radar_head_loss': radar_head_loss,
                 'distill_loss': distill_loss,
                 'final_box_dict': self._select_final_box_dict(batch_dict),

@@ -5,8 +5,13 @@
 import argparse
 import os
 import time
+import sys
+from pathlib import Path
 from typing import OrderedDict
 import importlib
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 import torch
 import open3d as o3d
 from torch.utils.data import DataLoader, Subset

@@ -308,7 +308,16 @@ def main():
         if opt.distributed:
             sampler_train.set_epoch(epoch)
         for i, batch_data in enumerate(train_loader):
-            if batch_data is None:
+            skip_batch = batch_data is None
+            if opt.distributed:
+                skip_tensor = torch.tensor(
+                    [1 if skip_batch else 0],
+                    dtype=torch.int32,
+                    device=device,
+                )
+                torch.distributed.all_reduce(skip_tensor, op=torch.distributed.ReduceOp.MAX)
+                skip_batch = bool(skip_tensor.item())
+            if skip_batch:
                 continue
             # the model will be evaluation mode during validation
             model.train()
@@ -354,13 +363,15 @@ def main():
             torch.cuda.empty_cache()
 
         if epoch % hypes['train_params']['eval_freq'] == 0:
-            valid_ave_loss = []
+            valid_loss_sum = 0.0
+            valid_loss_count = 0
+            eval_model = model_without_ddp
 
             with torch.no_grad():
                 for i, batch_data in enumerate(val_loader):
                     if batch_data is None:
                         continue
-                    model.eval()
+                    eval_model.eval()
 
                     batch_data = train_utils.to_device(batch_data, device)
                     batch_data['ego']['epoch'] = epoch
@@ -373,34 +384,49 @@ def main():
                         # CenterHead/PillarNet normally skips target assignment
                         # in eval mode. Validation still needs output_dict['loss'].
                         batch_data['ego']['compute_loss'] = True
-                    ouput_dict = model(batch_data['ego'])
+                    ouput_dict = eval_model(batch_data['ego'])
 
                     if kd_flag:
+                        teacher_model.eval()
                         teacher_output_dict = teacher_model(batch_data['ego'])
                         _merge_teacher_outputs(ouput_dict, teacher_output_dict)
 
                     final_loss = criterion(ouput_dict,
                                            batch_data['ego']['label_dict'])
-                    valid_ave_loss.append(final_loss.item())
+                    valid_loss_sum += final_loss.item()
+                    valid_loss_count += 1
 
-            valid_ave_loss = statistics.mean(valid_ave_loss) if valid_ave_loss else 0.0
-            valid_ave_loss = _distributed_mean(valid_ave_loss, device)
-            print('At epoch %d, the validation loss is %f' % (epoch,
-                                                              valid_ave_loss))
-            if writer is not None:
-                writer.add_scalar('Validate_Loss', valid_ave_loss, epoch)
+            if opt.distributed:
+                valid_stats = torch.tensor(
+                    [valid_loss_sum, float(valid_loss_count)],
+                    dtype=torch.float32,
+                    device=device,
+                )
+                torch.distributed.all_reduce(valid_stats, op=torch.distributed.ReduceOp.SUM)
+                valid_loss_sum = float(valid_stats[0].item())
+                valid_loss_count = int(valid_stats[1].item())
 
-            # lowest val loss
-            if _rank_zero(opt) and valid_ave_loss < lowest_val_loss:
-                lowest_val_loss = valid_ave_loss
-                torch.save(model_without_ddp.state_dict(),
-                       os.path.join(saved_path,
-                                    'net_epoch_bestval_at%d.pth' % (epoch + 1)))
-                if lowest_val_epoch != -1 and os.path.exists(os.path.join(saved_path,
-                                    'net_epoch_bestval_at%d.pth' % (lowest_val_epoch))):
-                    os.remove(os.path.join(saved_path,
-                                    'net_epoch_bestval_at%d.pth' % (lowest_val_epoch)))
-                lowest_val_epoch = epoch + 1
+            valid_ave_loss = valid_loss_sum / max(valid_loss_count, 1)
+            if _rank_zero(opt):
+                print('At epoch %d, the validation loss is %f' % (epoch,
+                                                                  valid_ave_loss))
+                if writer is not None:
+                    writer.add_scalar('val/loss/total', valid_ave_loss, epoch)
+
+                # lowest val loss
+                if valid_ave_loss < lowest_val_loss:
+                    lowest_val_loss = valid_ave_loss
+                    torch.save(model_without_ddp.state_dict(),
+                           os.path.join(saved_path,
+                                        'net_epoch_bestval_at%d.pth' % (epoch + 1)))
+                    if lowest_val_epoch != -1 and os.path.exists(os.path.join(saved_path,
+                                        'net_epoch_bestval_at%d.pth' % (lowest_val_epoch))):
+                        os.remove(os.path.join(saved_path,
+                                        'net_epoch_bestval_at%d.pth' % (lowest_val_epoch)))
+                    lowest_val_epoch = epoch + 1
+
+            if opt.distributed:
+                torch.distributed.barrier()
 
         if _rank_zero(opt) and epoch % hypes['train_params']['save_freq'] == 0:
             torch.save(model_without_ddp.state_dict(),
