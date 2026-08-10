@@ -5,7 +5,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
-
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.data_utils.datasets import build_dataset
 from opencood.tools import train_utils

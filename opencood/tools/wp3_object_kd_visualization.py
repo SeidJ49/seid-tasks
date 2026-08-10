@@ -265,6 +265,36 @@ def main():
                     gt_boxes,
                     pc_range,
                 )
+            if all(key in maps for key in ('cma_radar_before_xconv4_mag', 'cma_radar_after_xconv4_mag', 'cma_radar_delta_xconv4_mag')):
+                save_custom_rgb_map(
+                    maps['cma_radar_before_xconv4_mag'],
+                    maps['cma_radar_after_xconv4_mag'],
+                    maps['cma_radar_delta_xconv4_mag'],
+                    sample_dir / 'cma_before_after_delta_overlay.png',
+                    'CMA: red before, green after, blue delta',
+                    gt_boxes,
+                    pc_range,
+                )
+            if all(key in maps for key in ('radar_evidence_mask', 'object_proto_radar_support_mask', 'object_proto_context_mask')):
+                save_custom_rgb_map(
+                    maps['radar_evidence_mask'],
+                    maps['object_proto_radar_support_mask'],
+                    maps['object_proto_context_mask'],
+                    sample_dir / 'proto_support_context_overlay.png',
+                    'Proto KD: red radar evidence, green object support, blue context',
+                    gt_boxes,
+                    pc_range,
+                )
+            if all(key in maps for key in ('semantic_radar_heatmap_mask', 'semantic_teacher_heatmap_mask', 'semantic_heatmap_weight_mask')):
+                save_custom_rgb_map(
+                    maps['semantic_radar_heatmap_mask'],
+                    maps['semantic_teacher_heatmap_mask'],
+                    maps['semantic_heatmap_weight_mask'],
+                    sample_dir / 'semantic_teacher_radar_weight_overlay.png',
+                    'Semantic KD: red radar response, green teacher response, blue KD weight',
+                    gt_boxes,
+                    pc_range,
+                )
             rows.append(row)
             print(f'[sample {index}] saved object-KD masks to {sample_dir}')
 

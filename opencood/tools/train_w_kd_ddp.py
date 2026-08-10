@@ -365,6 +365,8 @@ def main():
         if epoch % hypes['train_params']['eval_freq'] == 0:
             valid_loss_sum = 0.0
             valid_loss_count = 0
+            valid_component_sums = {}
+            valid_component_counts = {}
             eval_model = model_without_ddp
 
             with torch.no_grad():
@@ -395,6 +397,10 @@ def main():
                                            batch_data['ego']['label_dict'])
                     valid_loss_sum += final_loss.item()
                     valid_loss_count += 1
+                    for key, value in getattr(criterion, 'loss_dict', {}).items():
+                        if isinstance(value, (int, float)):
+                            valid_component_sums[key] = valid_component_sums.get(key, 0.0) + float(value)
+                            valid_component_counts[key] = valid_component_counts.get(key, 0) + 1
 
             if opt.distributed:
                 valid_stats = torch.tensor(
@@ -405,13 +411,34 @@ def main():
                 torch.distributed.all_reduce(valid_stats, op=torch.distributed.ReduceOp.SUM)
                 valid_loss_sum = float(valid_stats[0].item())
                 valid_loss_count = int(valid_stats[1].item())
+                for key in sorted(valid_component_sums.keys()):
+                    component_stats = torch.tensor(
+                        [valid_component_sums[key], float(valid_component_counts[key])],
+                        dtype=torch.float32,
+                        device=device,
+                    )
+                    torch.distributed.all_reduce(component_stats, op=torch.distributed.ReduceOp.SUM)
+                    valid_component_sums[key] = float(component_stats[0].item())
+                    valid_component_counts[key] = int(component_stats[1].item())
 
             valid_ave_loss = valid_loss_sum / max(valid_loss_count, 1)
+            valid_component_avgs = {
+                key: valid_component_sums[key] / max(valid_component_counts.get(key, 0), 1)
+                for key in valid_component_sums
+            }
             if _rank_zero(opt):
                 print('At epoch %d, the validation loss is %f' % (epoch,
                                                                   valid_ave_loss))
+                if valid_component_avgs:
+                    component_msg = ', '.join(
+                        '%s=%.4f' % (key, valid_component_avgs[key])
+                        for key in sorted(valid_component_avgs.keys())
+                    )
+                    print('Validation components: %s' % component_msg)
                 if writer is not None:
                     writer.add_scalar('val/loss/total', valid_ave_loss, epoch)
+                    for key, value in valid_component_avgs.items():
+                        writer.add_scalar('val/components/%s' % key, value, epoch)
 
                 # lowest val loss
                 if valid_ave_loss < lowest_val_loss:

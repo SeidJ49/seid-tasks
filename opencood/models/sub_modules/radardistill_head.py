@@ -543,8 +543,8 @@ class RadarCenterHead(nn.Module):
         total_loss = 0
         tb_dict = {}
         for index, pred_dict in enumerate(pred_dicts):
-            pred_dict['hm'] = clip_sigmoid(pred_dict['hm'])
-            hm_loss = self.hm_loss_func(pred_dict['hm'], target_dicts['heatmaps'][index])
+            hm_pred = clip_sigmoid(pred_dict['hm'])
+            hm_loss = self.hm_loss_func(hm_pred, target_dicts['heatmaps'][index])
             hm_loss = hm_loss * self.model_cfg['loss_config']['loss_weights']['cls_weight']
 
             pred_boxes = torch.cat([pred_dict[name] for name in self.separate_head_cfg['head_order'] if name != 'iou'], dim=1)

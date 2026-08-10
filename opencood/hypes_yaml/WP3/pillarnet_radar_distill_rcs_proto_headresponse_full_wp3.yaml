@@ -1,0 +1,292 @@
+name: pillarnet_radar_distill_rcs_proto_headresponse_full_wp3
+
+version: "v1.0-trainval"
+
+root_dir: /home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/pkls/local_paths/train.pkl
+validate_dir: /home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/pkls/local_paths/val.pkl
+test_dir: /home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/pkls/local_paths/test.pkl
+
+ref_frame: 'ego_pose'
+
+yaml_parser: "load_pillarnet_radar_params"
+train_params:
+  # DDP uses this as the per-GPU batch size in train_w_kd_ddp.py.
+  batch_size: 2
+  epoches: 20
+  eval_freq: 1
+  save_freq: 1
+  grad_norm_clip: 10
+  num_workers: 8
+  # Full-training variant: no pretrained checkpoint and no trainable-parameter
+  # filter. This tests prototype KD as a training objective, not only BEV-block
+  # fine-tuning.
+
+input_source: ['lidar']
+label_type: 'lidar'
+only_vis_ego: true
+
+fusion:
+  core_method: 'SingleDatasetLidarRadarBaseline'
+  dataset: 'v2xsim'
+  args: []
+
+preprocess:
+  core_method: 'SpVoxelPreprocessor'
+  args:
+    voxel_size: &pre_voxel_size [0.4, 0.4, 8]
+    max_points_per_voxel: 32
+    max_voxel_train: 32000
+    max_voxel_test: 70000
+    lidar_num_point_features: 5
+    radar_max_points_per_voxel: 8
+    radar_max_voxel_train: 12000
+    radar_max_voxel_test: 20000
+    radar_num_point_features: 5
+  cav_lidar_range: &cav_lidar [-54.0, -54.0, -5.0, 54.0, 54.0, 3.0]
+
+data_augment:
+  - NAME: gt_sampling
+    DB_INFO_PATH:
+      - /home/nj644/dev/Studis/seid-tasks/man-truckscenes_sensordata_v1.2-mini/man-truckscenes/v1.0-trainval/nuscenes_dbinfos_1sweeps_with_radar_withvelo.pkl
+    PREPARE:
+      filter_by_min_points:
+        - 'car:5'
+        - 'truck:5'
+        - 'bus:5'
+        - 'trailer:5'
+        - 'other_vehicle:5'
+        - 'pedestrian:5'
+        - 'motorcycle:5'
+        - 'bicycle:5'
+    SAMPLE_GROUPS:
+      - 'car:2'
+      - 'truck:3'
+      - 'bus:4'
+      - 'trailer:6'
+      - 'other_vehicle:4'
+      - 'pedestrian:2'
+      - 'motorcycle:6'
+      - 'bicycle:6'
+    NUM_POINT_FEATURES: 5
+    DATABASE_WITH_FAKELIDAR: false
+    REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
+    LIMIT_WHOLE_SCENE: true
+  - NAME: random_world_flip
+    ALONG_AXIS_LIST: ['x', 'y']
+  - NAME: random_world_rotation
+    WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
+  - NAME: random_world_scaling
+    WORLD_SCALE_RANGE: [0.9, 1.1]
+  - NAME: random_world_translation
+    NOISE_TRANSLATE_STD: [0.5, 0.5, 0.5]
+
+postprocess:
+  core_method: 'VoxelPostprocessor'
+  gt_range: *cav_lidar
+  filter_min_points_in_gt: 1
+  anchor_args:
+    cav_lidar_range: *cav_lidar
+    l: 3.9
+    w: 1.6
+    h: 1.56
+    r: [0, 90]
+    feature_stride: 2
+    num: 2
+  target_args:
+    pos_threshold: 0.6
+    neg_threshold: 0.45
+    score_threshold: 0.20
+  order: 'hwl'
+  max_num: 100
+  nms_thresh: 0.15
+
+model:
+  core_method: pillarnet_radar_distill
+  args:
+    model_voxel_size: &model_voxel_size [0.075, 0.075, 8]
+    model_lidar_range: *cav_lidar
+    voxel_size: *model_voxel_size
+    lidar_range: *cav_lidar
+    lidar_num_point_features: 5
+    radar_num_point_features: 5
+    class_names: &class_names ['car', 'truck', 'bus', 'trailer', 'other_vehicle', 'pedestrian', 'motorcycle', 'bicycle']
+    train_stage: distill
+    freeze_teacher: true
+    teacher_ckpt: /home/nj644/dev/Studis/seid-tasks/opencood/logs/RadarDistill/pillarnet_radardistill_teacher_2026_07_23_10_31_32/net_epoch8.pth
+    teacher_loss_weight: 1.0
+    radar_loss_weight: 1.0
+    distill_loss_weight: 1.0
+
+    lidar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      use_cluster_xyz: true
+      use_relative_xyz: true
+      num_filters: [32]
+
+    radar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      use_cluster_xyz: true
+      use_relative_xyz: true
+      num_filters: [32]
+
+    teacher_bev_backbone: &bev_backbone_cfg
+      layer_nums: [5, 5]
+      num_filters: [256, 256]
+      num_upsample_filters: [128, 128]
+      upsample_strides: [1, 2]
+
+    teacher_head: &head_cfg
+      input_channels: 256
+      shared_conv_channel: 64
+      num_hm_conv: 2
+      predict_boxes_when_training: false
+      use_bias_before_norm: true
+      iou_reg: DIoU
+      rectifier: 0.5
+      class_names_each_head: [['car'], ['truck', 'other_vehicle'], ['bus', 'trailer'], ['pedestrian'], ['motorcycle', 'bicycle']]
+      target_assigner_config:
+        feature_map_stride: 8
+        num_max_objs: 100
+        gaussian_overlap: 0.1
+        min_radius: 2
+      separate_head_cfg:
+        head_order: ['center', 'center_z', 'dim', 'rot', 'vel', 'iou']
+        head_dict:
+          center:
+            out_channels: 2
+            num_conv: 2
+          center_z:
+            out_channels: 1
+            num_conv: 2
+          dim:
+            out_channels: 3
+            num_conv: 2
+          rot:
+            out_channels: 2
+            num_conv: 2
+          vel:
+            out_channels: 2
+            num_conv: 2
+          iou:
+            out_channels: 1
+            num_conv: 2
+      loss_config:
+        loss_weights:
+          cls_weight: 1.0
+          loc_weight: 0.25
+          iou_weight: 1.0
+          code_weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2, 1.0, 1.0]
+      post_processing:
+        score_thresh: 0.1
+        max_obj_per_sample: 500
+        post_center_limit_range: [-61.2, -61.2, -10.0, 61.2, 61.2, 10.0]
+        nms_config:
+          nms_thresh: 0.2
+          nms_pre_maxsize: 1000
+          nms_post_maxsize: 83
+
+    radar_distill:
+      <<: *bev_backbone_cfg
+      # Prototype + direct CenterHead response KD: no AFD/PFD and no dense
+      # ObjectKD. This tests whether task-level heatmap guidance fixes the
+      # weak objectness signal seen in prototype-only full training.
+      kd_mode: proto_semantic
+      radar_evidence_mask:
+        enabled: true
+        apply_to: high
+        doppler_index: 4
+        rcs_index: 5
+        doppler_center: 5.0
+        doppler_scale: 3.0
+        rcs_center: -10.0
+        rcs_scale: 4.0
+        rcs_alpha: 0.25
+        combine: max
+        reduce: max
+        kernel_size: 3
+        # RCS-aware support: high-RCS points spread farther in the KD evidence map.
+        # Low-RCS points are not suppressed; they keep local 3x3 support.
+        rcs_aware_dilation: true
+        rcs_mid_threshold: 0.50
+        rcs_high_threshold: 0.75
+        rcs_mid_kernel_size: 5
+        rcs_high_kernel_size: 7
+        mask_floor: 0.50
+        weight_boost: 0.75
+        include_teacher_heatmap: true
+        use_lidar_intensity: true
+        lidar_intensity_index: 4
+        lidar_intensity_percentile: 0.95
+        lidar_intensity_kernel_size: 3
+        fusion: teacher_intensity_or_radar
+        preserve_weight_sum: true
+      object_kd:
+        enabled: false
+        metric: l2_norm
+        # Use oriented GT box area instead of CenterPoint center-peak heatmap.
+        foreground_source: box
+        box_scale: 1.0
+        box_dim_order: hwl
+        box_value: soft
+        box_soft_floor: 0.50
+        # Normalized object KD is small by design. This scale makes the logged
+        # Object KD term visible without making it dominate RadarDistill.
+        loss_weight: 250.0
+        teacher_floor: 0.75
+        radar_floor: 0.75
+        use_lidar_intensity: true
+        use_radar_support: true
+        min_mask_sum: 1.0
+      object_proto_kd:
+        enabled: true
+        loss_weight: 1.0
+        top_fraction: 0.20
+        context_box_scale: 1.25
+        radar_floor: 0.05
+        teacher_floor: 0.50
+        weight_floor: 0.30
+        use_lidar_intensity: true
+        use_radar_support: true
+      semantic_heatmap_kd:
+        enabled: true
+        # Direct head-response KD, not CrossKD:
+        # BCEWithLogits(radar_hm_logits, sigmoid(lidar_hm_logits)).
+        loss_type: bce_logits
+        loss_weight: 1.0
+        temperature: 1.0
+        # Semantic KD should be teacher/GT driven; radar observability is used
+        # by prototype/local KD, not as the main semantic gate.
+        weight_source: teacher_confidence
+        teacher_floor: 0.20
+        use_radar_support: false
+        radar_boost: 0.0
+    radar_head:
+      <<: *head_cfg
+      predict_boxes_when_training: true
+
+loss:
+  core_method: radardistill_loss
+  args:
+    image_log_interval: 90
+    image_log_overwrite: true
+    image_log_detail: false
+
+optimizer:
+  core_method: AdamW
+  lr: 0.001
+  args:
+    eps: 1e-10
+    weight_decay: 0.01
+
+lr_scheduler:
+  core_method: onecycle
+  max_lr: 0.001
+  pct_start: 0.4
+  div_factor: 10
+  final_div_factor: 10000
+  anneal_strategy: cos
+  gamma: 0.1

@@ -102,6 +102,43 @@ def summarize_gradients(model):
     return rows
 
 
+def collect_gradients(model):
+    grads = {}
+    for name, param in model.named_parameters():
+        if param.grad is None:
+            continue
+        grads[name] = param.grad.detach().float().clone()
+    return grads
+
+
+def summarize_gradient_cosine(reference_grads, current_grads, model):
+    rows = {}
+    param_names = {name for name, _param in model.named_parameters()}
+    for name in sorted(param_names):
+        ref = reference_grads.get(name)
+        cur = current_grads.get(name)
+        if ref is None or cur is None:
+            continue
+        group = group_name(name)
+        row = rows.setdefault(group, {
+            'params_with_both_grad': 0,
+            'dot': 0.0,
+            'ref_norm_sq': 0.0,
+            'cur_norm_sq': 0.0,
+        })
+        row['params_with_both_grad'] += int(ref.numel())
+        row['dot'] += float((ref * cur).sum().item())
+        row['ref_norm_sq'] += float((ref * ref).sum().item())
+        row['cur_norm_sq'] += float((cur * cur).sum().item())
+
+    for row in rows.values():
+        denom = (row['ref_norm_sq'] ** 0.5) * (row['cur_norm_sq'] ** 0.5)
+        row['cosine_vs_radar_head'] = row['dot'] / denom if denom > 0 else 0.0
+        row['ref_grad_norm'] = row['ref_norm_sq'] ** 0.5
+        row['cur_grad_norm'] = row['cur_norm_sq'] ** 0.5
+    return rows
+
+
 def write_csv(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     fields = sorted({key for row in rows for key in row.keys()})
@@ -120,12 +157,24 @@ def get_loss_terms(model, batch):
     radar_distill = getattr(model, 'radar_distill', None)
     loss_terms = getattr(radar_distill, 'last_loss_terms', {}) if radar_distill is not None else {}
     object_kd_loss = loss_terms.get('object_kd', distill_loss.new_tensor(0.0))
+    object_proto_kd_loss = loss_terms.get('object_proto_kd', distill_loss.new_tensor(0.0))
+    semantic_heatmap_kd_loss = loss_terms.get('semantic_heatmap_kd', distill_loss.new_tensor(0.0))
+    response_kd_loss = loss_terms.get('response_kd', distill_loss.new_tensor(0.0))
+    proposal_error_kd_loss = loss_terms.get('proposal_error_kd', distill_loss.new_tensor(0.0))
+    task_dense_feature_kd_loss = loss_terms.get('task_dense_feature_kd', distill_loss.new_tensor(0.0))
+    learned_mask_loss = loss_terms.get('learned_mask', distill_loss.new_tensor(0.0))
     afd_loss = loss_terms.get('afd', distill_loss.new_tensor(0.0))
     pfd_loss = loss_terms.get('pfd', distill_loss.new_tensor(0.0))
     return {
         'radar_head': radar_head_loss,
         'distill_total': distill_loss,
         'object_kd': object_kd_loss,
+        'object_proto_kd': object_proto_kd_loss,
+        'semantic_heatmap_kd': semantic_heatmap_kd_loss,
+        'response_kd': response_kd_loss,
+        'proposal_error_kd': proposal_error_kd_loss,
+        'task_dense_feature_kd': task_dense_feature_kd_loss,
+        'learned_mask': learned_mask_loss,
         'afd': afd_loss,
         'pfd': pfd_loss,
         'total': output['loss'],
@@ -154,6 +203,7 @@ def main():
     model.train()
 
     rows = []
+    cosine_rows = []
     term_rows = []
     valid = 0
     for batch_idx, batch in enumerate(loader):
@@ -169,32 +219,83 @@ def main():
             'radar_head_loss': float(terms['radar_head'].detach().item()),
             'distill_total_loss': float(terms['distill_total'].detach().item()),
             'object_kd_loss': float(terms['object_kd'].detach().item()),
+            'object_proto_kd_loss': float(terms['object_proto_kd'].detach().item()),
+            'semantic_heatmap_kd_loss': float(terms['semantic_heatmap_kd'].detach().item()),
+            'response_kd_loss': float(terms['response_kd'].detach().item()),
+            'proposal_error_kd_loss': float(terms['proposal_error_kd'].detach().item()),
+            'task_dense_feature_kd_loss': float(terms['task_dense_feature_kd'].detach().item()),
+            'learned_mask_loss': float(terms['learned_mask'].detach().item()),
             'afd_loss': float(terms['afd'].detach().item()),
             'pfd_loss': float(terms['pfd'].detach().item()),
             'total_loss': float(terms['total'].detach().item()),
+            'object_proto_mask_mean': float(tb.get('object_proto_mask_mean', 0.0)),
+            'object_proto_observability_mean': float(tb.get('object_proto_observability_mean', 0.0)),
+            'semantic_heatmap_weight_mean': float(tb.get('semantic_heatmap_weight_mean', 0.0)),
+            'response_pos_weight_mean': float(tb.get('response_pos_weight_mean', 0.0)),
+            'response_neg_cell_mean': float(tb.get('response_neg_cell_mean', 0.0)),
+            'task_dense_mask_mean': float(tb.get('task_dense_mask_mean', 0.0)),
+            'task_dense_teacher_conf_mean': float(tb.get('task_dense_teacher_conf_mean', 0.0)),
+            'learned_mask_prior_mean': float(tb.get('learned_mask_prior_mean', 0.0)),
+            'learned_mask_pred_mean': float(tb.get('learned_mask_pred_mean', 0.0)),
+            'learned_mask_kd_mean': float(tb.get('learned_mask_kd_mean', 0.0)),
+            'proposal_fn_cell_mean': float(tb.get('proposal_fn_cell_mean', 0.0)),
+            'proposal_fp_cell_mean': float(tb.get('proposal_fp_cell_mean', 0.0)),
+            'proposal_fp_weight_mean': float(tb.get('proposal_fp_weight_mean', 0.0)),
             'object_kd_mask_mean': float(tb.get('object_kd_mask_mean', 0.0)),
             'radar_evidence_mask_mean': float(tb.get('radar_evidence_mask_mean', 0.0)),
             'lidar_intensity_mask_mean': float(tb.get('lidar_intensity_mask_mean', 0.0)),
         })
 
-        for loss_name in ['radar_head', 'object_kd', 'afd', 'pfd', 'distill_total', 'total']:
+        loss_names = [
+            'radar_head',
+            'object_kd',
+            'object_proto_kd',
+            'semantic_heatmap_kd',
+            'response_kd',
+            'proposal_error_kd',
+            'task_dense_feature_kd',
+            'learned_mask',
+            'afd',
+            'pfd',
+            'distill_total',
+            'total',
+        ]
+
+        reference_grads = None
+        for loss_name in loss_names:
             model.zero_grad(set_to_none=True)
             terms, _tb = get_loss_terms(model, batch)
             loss = terms[loss_name]
             if not torch.is_tensor(loss) or not loss.requires_grad:
                 continue
             loss.backward()
+            cur_grads = collect_gradients(model)
+            if loss_name == 'radar_head':
+                reference_grads = cur_grads
             grad_stats = summarize_gradients(model)
             for group, stat in grad_stats.items():
                 row = {'sample': batch_idx, 'loss_name': loss_name, 'loss_value': float(loss.detach().item()), 'group': group}
                 row.update(stat)
                 rows.append(row)
+            if reference_grads is not None and loss_name != 'radar_head':
+                cosine_stats = summarize_gradient_cosine(reference_grads, cur_grads, model)
+                for group, stat in cosine_stats.items():
+                    row = {
+                        'sample': batch_idx,
+                        'loss_name': loss_name,
+                        'loss_value': float(loss.detach().item()),
+                        'group': group,
+                    }
+                    row.update(stat)
+                    cosine_rows.append(row)
         valid += 1
 
     write_csv(output_dir / 'loss_terms.csv', term_rows)
     write_csv(output_dir / 'gradient_attribution.csv', rows)
+    write_csv(output_dir / 'gradient_cosine_vs_radar_head.csv', cosine_rows)
     print(f'wrote {output_dir / "loss_terms.csv"}')
     print(f'wrote {output_dir / "gradient_attribution.csv"}')
+    print(f'wrote {output_dir / "gradient_cosine_vs_radar_head.csv"}')
 
 
 if __name__ == '__main__':
