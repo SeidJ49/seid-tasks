@@ -355,7 +355,6 @@ def main():
     bestval_model_list = glob.glob(os.path.join(saved_path, "net_epoch_bestval_at*"))
 
     if len(bestval_model_list) > 1:
-        import numpy as np
         bestval_model_epoch_list = [eval(x.split("/")[-1].lstrip("net_epoch_bestval_at").rstrip(".pth")) for x in bestval_model_list]
         ascending_idx = np.argsort(bestval_model_epoch_list)
         for idx in ascending_idx:

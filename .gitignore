@@ -24,3 +24,9 @@ __pycache__/
 build/
 *.egg-info/
 outputs/
+
+# Versioned AP12 training configurations
+/configs/*
+!/configs/wp3_guided_pfd/
+!/configs/wp3_guided_pfd/**
+!/configs/
