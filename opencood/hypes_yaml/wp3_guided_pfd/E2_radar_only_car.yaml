@@ -10,6 +10,7 @@ ref_frame: 'ego_pose'
 
 yaml_parser: "load_pillarnet_radar_params"
 train_params:
+  # DDP uses this as the per-GPU batch size in train_w_kd_ddp.py.
   batch_size: 2
   epoches: 5
   eval_freq: 1
@@ -17,6 +18,9 @@ train_params:
   grad_norm_clip: 10
   num_workers: 8
   pretrained_model_path: /home/nj644/dev/Studis/seid-tasks/opencood/logs/pillarnet_radar_distill_rcs_wp3_2026_07_26_19_12_03/net_epoch20.pth
+  # Freeze VFE/backbone and head weights. The radar head loss still backprops
+  # through the frozen head into radar_distill features, but the class-head
+  # parameters themselves cannot recalibrate.
   trainable_parameter_keywords: ['radar_distill']
 
 input_source: ['lidar']
@@ -56,15 +60,15 @@ data_augment:
         - 'pedestrian:5'
         - 'motorcycle:5'
         - 'bicycle:5'
-      SAMPLE_GROUPS:
-        - 'car:2'
-        - 'truck:3'
-        - 'bus:4'
-        - 'trailer:6'
-        - 'other_vehicle:4'
-        - 'pedestrian:2'
-        - 'motorcycle:6'
-        - 'bicycle:6'
+    SAMPLE_GROUPS:
+      - 'car:2'
+      - 'truck:3'
+      - 'bus:4'
+      - 'trailer:6'
+      - 'other_vehicle:4'
+      - 'pedestrian:2'
+      - 'motorcycle:6'
+      - 'bicycle:6'
     NUM_POINT_FEATURES: 5
     DATABASE_WITH_FAKELIDAR: false
     REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
@@ -189,58 +193,31 @@ model:
 
     radar_distill:
       <<: *bev_backbone_cfg
-      kd_mode: prototype_only
-      radar_evidence_mask:
-        enabled: true
-        apply_to: high
-        doppler_index: 4
-        rcs_index: 5
-        doppler_center: 5.0
-        doppler_scale: 3.0
-        rcs_center: -10.0
-        rcs_scale: 4.0
-        rcs_alpha: 0.25
-        combine: max
-        reduce: max
-        kernel_size: 3
-        rcs_aware_dilation: true
-        rcs_mid_threshold: 0.50
-        rcs_high_threshold: 0.75
-        rcs_mid_kernel_size: 5
-        rcs_high_kernel_size: 7
-        mask_floor: 0.50
-        weight_boost: 0.75
-        include_teacher_heatmap: true
-        use_lidar_intensity: true
-        lidar_intensity_index: 4
-        lidar_intensity_percentile: 0.95
-        lidar_intensity_kernel_size: 3
-        fusion: teacher_intensity_or_radar
-        preserve_weight_sum: true
-      object_kd:
-        enabled: false
-        metric: l2_norm
-        foreground_source: box
-        box_scale: 1.0
-        box_dim_order: hwl
-        box_value: soft
-        box_soft_floor: 0.50
-        loss_weight: 250.0
-        teacher_floor: 0.75
-        radar_floor: 0.75
-        use_lidar_intensity: true
-        use_radar_support: true
-        min_mask_sum: 1.0
-      object_proto_kd:
-        enabled: true
-        loss_weight: 1.0
-        top_fraction: 0.20
-        context_box_scale: 1.25
-        radar_floor: 0.05
-        teacher_floor: 0.50
-        weight_floor: 0.30
-        use_lidar_intensity: true
-        use_radar_support: true
+      # Keep native RadarDistill AFD/PFD active; Guided PFD below
+      # only redistributes the native PFD object budget.
+      kd_mode: radardistill
+
+    wp3_guided_pfd:
+      enabled: true
+      scope:
+        mode: car_only
+      variant: radar_only
+      teacher_reliability:
+        mode: true_class_score
+        floor: 0.25
+      radar_evidence:
+        mode: point_count
+        point_kappa: 4.0
+        floor: 0.25
+        use_doppler: false
+      combine:
+        mode: geometric_mean
+        floor: 0.25
+      budget:
+        preserve_selected_class_object_budget: true
+        preserve_rest_exactly: true
+      car_weight_reference_alpha: 1.0
+      debug: false
     radar_head:
       <<: *head_cfg
       predict_boxes_when_training: true
@@ -262,8 +239,9 @@ optimizer:
 lr_scheduler:
   core_method: onecycle
   max_lr: 0.0001
-  pct_start: 0.4
-  div_factor: 10
+  # Start directly at 1e-4 and decay without a warm-up phase.
+  pct_start: 0.0
+  div_factor: 1
   final_div_factor: 10000
   anneal_strategy: cos
   gamma: 0.1
