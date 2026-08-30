@@ -3,8 +3,10 @@
 # License: TDG-Attribution-NonCommercial-NoDistrib
 import argparse
 import os
+import random
 import statistics
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
@@ -123,6 +125,21 @@ def train_parser():
 def main():
     opt = train_parser()
     hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
+
+    # Optional reproducibility contract used by the AP10 controlled series.
+    # Existing configs without train_params.seed retain their prior behavior.
+    train_params = hypes.get('train_params', {})
+    if 'seed' in train_params:
+        seed = int(train_params['seed'])
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        if bool(train_params.get('deterministic', False)):
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+        print(f'[Reproducibility] seed={seed}, deterministic={bool(train_params.get("deterministic", False))}')
 
     print('Dataset Building')
     opencood_train_dataset = build_dataset(hypes, visualize=False, train=True)

@@ -62,6 +62,16 @@ class PointPillarRadarDistill(nn.Module):
         radar_distill_cfg.setdefault('point_cloud_range', self.point_cloud_range)
         radar_distill_cfg.setdefault('voxel_size', self.voxel_size)
         radar_distill_cfg.setdefault('grid_size', self.grid_size)
+        radar_distill_cfg.setdefault('wp3_guided_pfd', args.get('wp3_guided_pfd', {}))
+        radar_distill_cfg.setdefault('class_names', self.class_names)
+        radar_distill_cfg.setdefault(
+            'class_names_each_head', args['radar_head']['class_names_each_head'])
+        target_cfg = args['radar_head'].get('target_assigner_config', {})
+        radar_distill_cfg.setdefault(
+            'feature_map_stride', target_cfg.get('feature_map_stride', 8))
+        radar_distill_cfg.setdefault(
+            'gaussian_overlap', target_cfg.get('gaussian_overlap', 0.1))
+        radar_distill_cfg.setdefault('min_radius', target_cfg.get('min_radius', 2))
         self.radar_distill = RadarDistill(radar_distill_cfg)
         self.radar_head = RadarCenterHead(
             args['radar_head'],

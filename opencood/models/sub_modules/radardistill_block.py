@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from opencood.models.sub_modules.radardistill_bev_backbone import BaseBEVBackboneV2
+from opencood.models.sub_modules.guided_pfd import GuidedPFD
 from opencood.pcdet_utils.basicblock.modules.Basicblock_convn import ConvNeXtBlock
 
 
@@ -17,6 +18,17 @@ class RadarDistill(BaseBEVBackboneV2):
         self.voxel_size = model_cfg.get('voxel_size', None)
         self.grid_size = model_cfg.get('grid_size', None)
         self.kd_mode = model_cfg.get('kd_mode', 'radardistill')
+        self.guided_pfd = GuidedPFD(
+            model_cfg.get('wp3_guided_pfd', {}),
+            model_cfg['class_names'],
+            model_cfg['class_names_each_head'],
+            self.point_cloud_range,
+            self.voxel_size,
+            feature_map_stride=model_cfg.get('feature_map_stride', 8),
+            gaussian_overlap=model_cfg.get('gaussian_overlap', 0.1),
+            min_radius=model_cfg.get('min_radius', 2),
+        )
+        self.guided_pfd_last_output = None
         evidence_cfg = model_cfg.get('radar_evidence_mask', {})
         self.use_radar_evidence_mask = bool(evidence_cfg.get('enabled', False))
         self.evidence_apply_to = evidence_cfg.get('apply_to', 'high')
@@ -457,6 +469,9 @@ class RadarDistill(BaseBEVBackboneV2):
             lidar_bev_8x,
             heatmaps,
             radar_preds,
+            teacher_preds,
+            radar_points,
+            gt_boxes,
             radar_evidence_mask=None,
             lidar_intensity_mask=None):
         # NOTE: This is the PFD part of RadarDistill. It uses proposal/heatmap
@@ -538,6 +553,19 @@ class RadarDistill(BaseBEVBackboneV2):
             self.debug_maps['distill_final_mask'] = final_mask.detach()
             self.debug_maps['pfd_weight_after_evidence'] = weight.detach()
 
+        self.debug_maps['pfd_native_weight'] = weight.detach()
+        guided_output = self.guided_pfd(
+            weight, teacher_preds, radar_preds, radar_points, gt_boxes)
+        self.guided_pfd_last_output = guided_output
+        weight = guided_output['guided_weight']
+        self.debug_maps['pfd_guided_weight'] = weight.detach()
+        self.debug_maps['guided_car_object_mask'] = guided_output['car_object_mask']
+        self.debug_maps['guided_teacher_reliability_map'] = guided_output['teacher_reliability_map']
+        self.debug_maps['guided_radar_evidence_map'] = guided_output['radar_evidence_map']
+        self.debug_maps['guided_combined_q_map'] = guided_output['combined_q_map']
+        self.debug_maps['guided_pfd_difference'] = (
+            weight - self.debug_maps['pfd_native_weight']).detach()
+
         scaled_radar = radar_bev.softmax(1)
         scaled_lidar = lidar_bev.softmax(1)
         scaled_radar_8x = radar_bev_8x.softmax(1)
@@ -552,6 +580,12 @@ class RadarDistill(BaseBEVBackboneV2):
             tb_dict['lidar_intensity_mask_mean'] = lidar_intensity_mean.item()
         if final_mask_mean is not None:
             tb_dict['distill_final_mask_mean'] = final_mask_mean.item()
+        tb_dict['guided_pfd_total_budget_error'] = torch.max(torch.abs(
+            guided_output['guided_total_mass'] - guided_output['native_total_mass'])).item()
+        tb_dict['guided_pfd_car_budget_error'] = torch.max(torch.abs(
+            guided_output['guided_car_mass'] - guided_output['native_car_mass'])).item()
+        tb_dict['guided_pfd_rest_budget_error'] = torch.max(torch.abs(
+            guided_output['guided_rest_mass'] - guided_output['native_rest_mass'])).item()
         return 0.5 * (high_loss + high_loss_8x), tb_dict
 
     def object_kd_loss(
@@ -1769,6 +1803,9 @@ class RadarDistill(BaseBEVBackboneV2):
             high_lidar_bev_8x,
             batch_dict['target_dicts']['heatmaps'],
             batch_dict['radar_pred_dicts'],
+            batch_dict['lidar_pred_dicts'],
+            batch_dict['radar_points'],
+            batch_dict['gt_boxes'],
             radar_evidence_mask=radar_evidence_mask,
             lidar_intensity_mask=lidar_intensity_mask,
         )
