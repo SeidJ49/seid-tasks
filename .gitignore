@@ -6,7 +6,6 @@
 !/opencood/**
 !/run_tests.sh
 !/run_tests-fog.sh
-!/configs/
 
 # Generated/build artifacts
 /build/
