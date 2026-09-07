@@ -14,6 +14,12 @@ from tensorboardX import SummaryWriter
 import importlib
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.tools import train_utils
+from opencood.tools.opportunity_contract import (
+    format_contract_report, validate_opportunity_checkpoint_contract)
+from opencood.tools.preservation_contract import (
+    format_contract_report as format_preservation_contract_report,
+    validate_preservation_checkpoint_contract,
+)
 from opencood.data_utils.datasets import build_dataset
 import glob
 # from icecream import ic
@@ -125,6 +131,12 @@ def train_parser():
 def main():
     opt = train_parser()
     hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
+    opportunity_contract = validate_opportunity_checkpoint_contract(hypes)
+    if opportunity_contract.get('active', False):
+        print(format_contract_report(opportunity_contract))
+    preservation_contract = validate_preservation_checkpoint_contract(hypes)
+    if preservation_contract.get('active', False):
+        print(format_preservation_contract_report(preservation_contract))
 
     # Optional reproducibility contract used by the AP10 controlled series.
     # Existing configs without train_params.seed retain their prior behavior.
@@ -189,6 +201,9 @@ def main():
                 f"[Fine-tune] initialized student from dir: {pretrained_model_dir} "
                 f"epoch={pretrained_model_epoch if pretrained_model_epoch is not None else 'last'}"
             )
+        if (opportunity_contract.get('active', False)
+                or preservation_contract.get('active', False)):
+            model.reload_selected_lidar_teacher()
         if fine_tune:
             print(
                 f"[Fine-tune] new run will train initialized weights for "
@@ -209,6 +224,9 @@ def main():
         saved_path = opt.model_dir
         init_epoch, model = train_utils.load_saved_model(saved_path, model)
         lowest_val_epoch = init_epoch
+        if (opportunity_contract.get('active', False)
+                or preservation_contract.get('active', False)):
+            model.reload_selected_lidar_teacher()
         scheduler = train_utils.setup_lr_schedular(
             hypes, optimizer, init_epoch=init_epoch, steps_per_epoch=max(len(train_loader), 1))
 
@@ -262,6 +280,9 @@ def main():
     for epoch in range(init_epoch, max(epoches, init_epoch)):
         for param_group in optimizer.param_groups:
             print('learning rate %f' % param_group["lr"])
+        if optimizer.param_groups:
+            writer.add_scalar(
+                'train/optimization/lr', optimizer.param_groups[0]['lr'], epoch)
         for i, batch_data in enumerate(train_loader):
             if batch_data is None:
                 continue
@@ -322,6 +343,8 @@ def main():
                     final_loss = criterion(ouput_dict,
                                            batch_data['ego']['label_dict'])
                     valid_ave_loss.append(final_loss.item())
+                    criterion.logging(
+                        epoch, i, len(val_loader), writer, suffix="_val")
 
             valid_ave_loss = statistics.mean(valid_ave_loss)
             print('At epoch %d, the validation loss is %f' % (epoch,

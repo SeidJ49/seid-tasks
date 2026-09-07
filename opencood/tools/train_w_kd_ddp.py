@@ -17,6 +17,12 @@ from tensorboardX import SummaryWriter
 import importlib
 import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.tools import train_utils
+from opencood.tools.opportunity_contract import (
+    format_contract_report, validate_opportunity_checkpoint_contract)
+from opencood.tools.preservation_contract import (
+    format_contract_report as format_preservation_contract_report,
+    validate_preservation_checkpoint_contract,
+)
 from opencood.data_utils.datasets import build_dataset
 from opencood.tools import multi_gpu_utils
 import glob
@@ -155,6 +161,12 @@ def _setup_train_dir(hypes, opt):
 def main():
     opt = train_parser()
     hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
+    opportunity_contract = validate_opportunity_checkpoint_contract(hypes)
+    if opportunity_contract.get('active', False):
+        print(format_contract_report(opportunity_contract))
+    preservation_contract = validate_preservation_checkpoint_contract(hypes)
+    if preservation_contract.get('active', False):
+        print(format_preservation_contract_report(preservation_contract))
     multi_gpu_utils.init_distributed_mode(opt)
 
     print('Dataset Building')
@@ -214,6 +226,9 @@ def main():
                 f"[Fine-tune] initialized student from dir: {pretrained_model_dir} "
                 f"epoch={pretrained_model_epoch if pretrained_model_epoch is not None else 'last'}"
             )
+        if (opportunity_contract.get('active', False)
+                or preservation_contract.get('active', False)):
+            model.reload_selected_lidar_teacher()
         if fine_tune:
             print(
                 f"[Fine-tune] new run will train initialized weights for "
@@ -230,6 +245,9 @@ def main():
         saved_path = opt.model_dir
         init_epoch, model = train_utils.load_saved_model(saved_path, model)
         lowest_val_epoch = init_epoch
+        if (opportunity_contract.get('active', False)
+                or preservation_contract.get('active', False)):
+            model.reload_selected_lidar_teacher()
 
     else:
         init_epoch = 0
@@ -305,6 +323,9 @@ def main():
     for epoch in range(init_epoch, max(epoches, init_epoch)):
         for param_group in optimizer.param_groups:
             print('learning rate %f' % param_group["lr"])
+        if writer is not None and optimizer.param_groups:
+            writer.add_scalar(
+                'train/optimization/lr', optimizer.param_groups[0]['lr'], epoch)
         if opt.distributed:
             sampler_train.set_epoch(epoch)
         for i, batch_data in enumerate(train_loader):
@@ -439,6 +460,23 @@ def main():
                     writer.add_scalar('val/loss/total', valid_ave_loss, epoch)
                     for key, value in valid_component_avgs.items():
                         writer.add_scalar('val/components/%s' % key, value, epoch)
+                    opportunity_tags = {
+                        'opportunity_mean': 'mean',
+                        'opportunity_min': 'min',
+                        'opportunity_max': 'max',
+                        'opportunity_p10': 'p10',
+                        'opportunity_p90': 'p90',
+                        'opportunity_teacher_score_mean': 'teacher_score_mean',
+                        'opportunity_student_score_mean': 'student_score_mean',
+                        'opportunity_car_budget_error': 'car_budget_error',
+                    }
+                    for key, tag_name in opportunity_tags.items():
+                        if key in valid_component_avgs:
+                            writer.add_scalar(
+                                'val/opportunity/' + tag_name,
+                                valid_component_avgs[key],
+                                epoch,
+                            )
 
                 # lowest val loss
                 if valid_ave_loss < lowest_val_loss:

@@ -17,7 +17,7 @@ from opencood.models.sub_modules.teacher_reliability import (
 
 SUPPORTED_VARIANTS = {
     'native', 'teacher_only', 'radar_only', 'teacher_radar',
-    'teacher_radar_doppler', 'car_weight_reference',
+    'teacher_radar_doppler', 'car_weight_reference', 'opportunity',
 }
 
 
@@ -31,6 +31,15 @@ DEFAULT_CONFIG = {
         'use_doppler': False,
     },
     'combine': {'mode': 'geometric_mean', 'floor': 0.25},
+    'opportunity': {
+        'signal': 'O3_floor_need',
+        'teacher_floor': 0.25,
+        'use_radar_evidence': False,
+        'selected_student': '',
+        'selected_teacher': '',
+        'student_checkpoint_sha256': '',
+        'teacher_checkpoint_sha256': '',
+    },
     'budget': {
         'preserve_selected_class_object_budget': True,
         'preserve_rest_exactly': True,
@@ -63,6 +72,19 @@ class GuidedPFD(nn.Module):
         self.preserve_rest_exactly = bool(merged.get('budget', {}).get(
             'preserve_rest_exactly', True))
         self.reference_alpha = float(merged.get('car_weight_reference_alpha', 1.0))
+        opportunity_cfg = dict(merged.get('opportunity', {}))
+        self.opportunity_signal = str(opportunity_cfg.get(
+            'signal', 'O3_floor_need'))
+        self.opportunity_teacher_floor = float(opportunity_cfg.get(
+            'teacher_floor', 0.25))
+        self.opportunity_use_radar = bool(opportunity_cfg.get(
+            'use_radar_evidence', False))
+        self.selected_student = str(opportunity_cfg.get('selected_student', ''))
+        self.selected_teacher = str(opportunity_cfg.get('selected_teacher', ''))
+        self.student_checkpoint_sha256 = str(opportunity_cfg.get(
+            'student_checkpoint_sha256', '')).lower()
+        self.teacher_checkpoint_sha256 = str(opportunity_cfg.get(
+            'teacher_checkpoint_sha256', '')).lower()
         self.debug = bool(merged.get('debug', False))
         self.class_names = tuple(str(x) for x in class_names)
         self.class_names_each_head = tuple(tuple(str(x) for x in h) for h in class_names_each_head)
@@ -84,6 +106,19 @@ class GuidedPFD(nn.Module):
             raise ValueError('AP10 requires both budget preservation invariants.')
         if 'car' not in self.class_names:
             raise ValueError('Car-only guided PFD requires class car.')
+        if self.variant == 'opportunity':
+            if self.opportunity_signal != 'O3_floor_need':
+                raise ValueError(
+                    'AP14-1 requires opportunity.signal=O3_floor_need.')
+            if abs(self.opportunity_teacher_floor - 0.25) > self.eps:
+                raise ValueError(
+                    'AP14-1 selected O3 requires opportunity.teacher_floor=0.25.')
+            if self.opportunity_use_radar:
+                raise ValueError(
+                    'AP14-0 excludes radar evidence from the first opportunity variant.')
+            if not self.selected_student or not self.selected_teacher:
+                raise ValueError(
+                    'Opportunity guidance requires explicit selected_student and selected_teacher.')
         self.car_class_index = self.class_names.index('car')
 
         teacher_cfg = dict(merged.get('teacher_reliability', {}))
@@ -131,6 +166,7 @@ class GuidedPFD(nn.Module):
             'radar_points': empty_float, 'radar_evidence': empty_float,
             'doppler_evidence': empty_float, 'combined_q': empty_float,
             'student_score': empty_float, 'teacher_student_gap': empty_float,
+            'opportunity': empty_float,
             'native_object_mass': empty_float, 'guided_object_mass': empty_float,
             'mass_ratio': empty_float,
             'native_total_mass': native_weight.sum((1, 2, 3)).detach(),
@@ -214,10 +250,20 @@ class GuidedPFD(nn.Module):
                 noncar_support[batch_index, 0] |= gaussian > self.eps
                 q = native_weight.new_tensor(1.0)
             else:
+                teacher_score_detached = teacher_score[key].detach()
+                student_score_detached = student_score[key].detach()
                 t = teacher_rel[key].detach()
                 r = radar_rel[key].detach()
                 rd = doppler_rel[key].detach()
-                if variant == 'teacher_only':
+                if variant == 'opportunity':
+                    # AP14-0 selected this exact O3 need signal.  It is used
+                    # directly: no second floor and no radar multiplication.
+                    base = (
+                        self.opportunity_teacher_floor +
+                        (1.0 - self.opportunity_teacher_floor) * teacher_score_detached
+                    ) * (1.0 - student_score_detached)
+                    q = base.clamp(0.0, 1.0).detach()
+                elif variant == 'teacher_only':
                     base = t
                 elif variant == 'radar_only':
                     base = r
@@ -227,7 +273,8 @@ class GuidedPFD(nn.Module):
                     base = torch.sqrt(t * rd)
                 else:
                     base = native_weight.new_tensor(1.0)
-                q = self.combine_floor + (1.0 - self.combine_floor) * base
+                if variant != 'opportunity':
+                    q = self.combine_floor + (1.0 - self.combine_floor) * base
                 car_sum[batch_index, 0] += gaussian
                 q_numerator[batch_index, 0] += gaussian * q
                 q_denominator[batch_index, 0] += gaussian
@@ -247,6 +294,8 @@ class GuidedPFD(nn.Module):
         native_rest = native_weight * (1.0 - car_mask)
         tentative = native_car * q_map.detach()
         guided_car = tentative.clone()
+        native_fallback = torch.zeros(
+            (batch,), device=native_weight.device, dtype=torch.bool)
         for batch_index in range(batch):
             native_mass = native_car[batch_index].sum()
             tentative_mass = tentative[batch_index].sum()
@@ -254,13 +303,20 @@ class GuidedPFD(nn.Module):
                 guided_car[batch_index] = tentative[batch_index] * (native_mass / tentative_mass)
             else:
                 guided_car[batch_index] = native_car[batch_index]
+                native_fallback[batch_index] = True
         guided = guided_car + native_rest
+        # Preserve the exact native tensor values for zero-Car and all-zero-q
+        # batches; decomposition/recomposition can otherwise introduce a few
+        # floating-point ulps despite being mathematically identical.
+        guided = torch.where(
+            native_fallback.view(batch, 1, 1, 1), native_weight, guided)
 
         names = {
             'object_batch_index': [], 'object_box_index': [], 'object_class_index': [],
             'teacher_score': [], 'teacher_margin': [], 'teacher_reliability': [],
             'radar_points': [], 'radar_evidence': [], 'doppler_evidence': [],
             'combined_q': [], 'student_score': [], 'teacher_student_gap': [],
+            'opportunity': [],
             'native_object_mass': [], 'guided_object_mass': [], 'mass_ratio': [],
         }
         for batch_index, box_index, class_index, gaussian, q, key in object_values:
@@ -278,6 +334,11 @@ class GuidedPFD(nn.Module):
             names['combined_q'].append(q.detach())
             names['student_score'].append(student_score[key].detach())
             names['teacher_student_gap'].append(opportunity[key].detach())
+            exact_opportunity = (
+                self.opportunity_teacher_floor +
+                (1.0 - self.opportunity_teacher_floor) * teacher_score[key].detach()
+            ) * (1.0 - student_score[key].detach())
+            names['opportunity'].append(exact_opportunity.clamp(0.0, 1.0).detach())
             names['native_object_mass'].append(native_mass.detach())
             names['guided_object_mass'].append(guided_mass.detach())
             names['mass_ratio'].append((guided_mass / native_mass.clamp_min(self.eps)).detach())

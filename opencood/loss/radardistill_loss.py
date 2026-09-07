@@ -197,6 +197,10 @@ class RadardistillLoss(nn.Module):
             log_msg += ' || FP Cells: %.4f' % self.loss_dict['proposal_fp_cell_mean']
         if 'proposal_fn_cell_mean' in self.loss_dict:
             log_msg += ' || FN Cells: %.4f' % self.loss_dict['proposal_fn_cell_mean']
+        if 'opportunity_mean' in self.loss_dict:
+            log_msg += ' || Opportunity: %.4f' % self.loss_dict['opportunity_mean']
+        if 'preservation_loss' in self.loss_dict:
+            log_msg += ' || Preservation: %.4f' % self.loss_dict['preservation_loss']
         print(log_msg)
         if writer is not None:
             step = epoch * batch_len + batch_id
@@ -204,6 +208,33 @@ class RadardistillLoss(nn.Module):
             writer.add_scalar(self._tb_tag('loss/teacher_head', suffix), teacher_head_loss, step)
             writer.add_scalar(self._tb_tag('loss/radar_head', suffix), radar_head_loss, step)
             writer.add_scalar(self._tb_tag('distill/total', suffix), distill_loss, step)
+            writer.add_scalar(
+                self._tb_tag('loss/detection', suffix),
+                self.loss_dict.get('detection_loss', radar_head_loss),
+                step,
+            )
+            writer.add_scalar(
+                self._tb_tag('loss/distill', suffix),
+                self.loss_dict.get('lidar_kd_loss', distill_loss),
+                step,
+            )
+            if 'preservation_loss' in self.loss_dict:
+                preservation_tags = {
+                    'preservation_loss': 'loss/unweighted',
+                    'preservation_weighted_loss': 'loss/weighted',
+                    'preservation_object_count': 'objects/count',
+                    'preservation_abs_standardized_drift': 'drift/abs_standardized_mean',
+                    'preservation_student_response_mean': 'response/student_mean',
+                    'preservation_anchor_response_mean': 'response/anchor_mean',
+                    'preservation_empty_object_case': 'objects/empty_case',
+                }
+                for key, tag_name in preservation_tags.items():
+                    if key in self.loss_dict:
+                        writer.add_scalar(
+                            self._tb_tag('preservation/' + tag_name, suffix),
+                            self.loss_dict[key],
+                            step,
+                        )
             writer.add_scalar(
                 self._tb_tag('distill/low_feature', suffix),
                 self.loss_dict.get('low_feature_loss', 0.0),
@@ -229,6 +260,23 @@ class RadardistillLoss(nn.Module):
                 self.loss_dict.get('mask_loss_de8x', 0.0),
                 step,
             )
+            opportunity_tags = {
+                'opportunity_mean': 'mean',
+                'opportunity_min': 'min',
+                'opportunity_max': 'max',
+                'opportunity_p10': 'p10',
+                'opportunity_p90': 'p90',
+                'opportunity_teacher_score_mean': 'teacher_score_mean',
+                'opportunity_student_score_mean': 'student_score_mean',
+                'opportunity_car_budget_error': 'car_budget_error',
+            }
+            for key, tag_name in opportunity_tags.items():
+                if key in self.loss_dict:
+                    writer.add_scalar(
+                        self._tb_tag('opportunity/' + tag_name, suffix),
+                        self.loss_dict[key],
+                        step,
+                    )
             if 'radar_evidence_mask_mean' in self.loss_dict:
                 writer.add_scalar(
                     self._tb_tag('mask/radar_evidence_mean', suffix),

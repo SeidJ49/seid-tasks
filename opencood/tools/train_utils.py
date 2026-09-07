@@ -297,7 +297,28 @@ def setup_lr_schedular(hypes, optimizer, init_epoch=None, steps_per_epoch=None):
     lr_schedule_config = hypes['lr_scheduler']
     last_epoch = init_epoch if init_epoch is not None else 0
 
-    if lr_schedule_config['core_method'] == 'onecycle':
+    if lr_schedule_config['core_method'] in {'none', None}:
+        class NoOpLRScheduler(object):
+            step_per_batch = False
+
+            def __init__(self, wrapped_optimizer):
+                self.optimizer = wrapped_optimizer
+
+            def step(self, *args, **kwargs):
+                return None
+
+            def state_dict(self):
+                return {}
+
+            def load_state_dict(self, state_dict):
+                return None
+
+            def get_last_lr(self):
+                return [group['lr'] for group in self.optimizer.param_groups]
+
+        scheduler = NoOpLRScheduler(optimizer)
+
+    elif lr_schedule_config['core_method'] == 'onecycle':
         if steps_per_epoch is None:
             steps_per_epoch = 1
         total_step = hypes['train_params']['epoches'] * max(int(steps_per_epoch), 1)

@@ -586,6 +586,44 @@ class RadarDistill(BaseBEVBackboneV2):
             guided_output['guided_car_mass'] - guided_output['native_car_mass'])).item()
         tb_dict['guided_pfd_rest_budget_error'] = torch.max(torch.abs(
             guided_output['guided_rest_mass'] - guided_output['native_rest_mass'])).item()
+        if self.guided_pfd.enabled and self.guided_pfd.variant == 'opportunity':
+            car_objects = (
+                guided_output['object_class_index'] ==
+                self.guided_pfd.car_class_index
+            )
+            opportunity = guided_output['opportunity'][car_objects]
+            teacher_score = guided_output['teacher_score'][car_objects]
+            student_score = guided_output['student_score'][car_objects]
+            if opportunity.numel() > 0:
+                quantiles = torch.quantile(
+                    opportunity.float(),
+                    opportunity.new_tensor([0.10, 0.90]).float(),
+                )
+                tb_dict.update({
+                    'opportunity_mean': opportunity.mean().item(),
+                    'opportunity_min': opportunity.min().item(),
+                    'opportunity_max': opportunity.max().item(),
+                    'opportunity_p10': quantiles[0].item(),
+                    'opportunity_p90': quantiles[1].item(),
+                    'opportunity_teacher_score_mean': teacher_score.mean().item(),
+                    'opportunity_student_score_mean': student_score.mean().item(),
+                    'opportunity_count': int(opportunity.numel()),
+                })
+            else:
+                # Zero-Car batches remain finite and produce explicit neutral
+                # telemetry instead of NaN TensorBoard values.
+                tb_dict.update({
+                    'opportunity_mean': 0.0,
+                    'opportunity_min': 0.0,
+                    'opportunity_max': 0.0,
+                    'opportunity_p10': 0.0,
+                    'opportunity_p90': 0.0,
+                    'opportunity_teacher_score_mean': 0.0,
+                    'opportunity_student_score_mean': 0.0,
+                    'opportunity_count': 0,
+                })
+            tb_dict['opportunity_car_budget_error'] = tb_dict[
+                'guided_pfd_car_budget_error']
         return 0.5 * (high_loss + high_loss_8x), tb_dict
 
     def object_kd_loss(

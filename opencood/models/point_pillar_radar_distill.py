@@ -4,6 +4,10 @@ import torch.nn as nn
 from opencood.models.sub_modules.radardistill_bev_backbone import BaseBEVBackboneV2
 from opencood.models.sub_modules.radardistill_block import RadarDistill
 from opencood.models.sub_modules.radardistill_head import CenterHead, RadarCenterHead
+from opencood.models.sub_modules.preservation import (
+    FrozenRadarAnchor,
+    HeatmapPreservationLoss,
+)
 from opencood.models.sub_modules.radardistill_spconv_backbone import PillarRes18BackBone8x, RadarPillarRes18BackBone8x
 from opencood.models.sub_modules.radardistill_vfe import (
     DynamicPillarVFESimple2D,
@@ -27,6 +31,7 @@ class PointPillarRadarDistill(nn.Module):
         self.distill_loss_weight = args.get('distill_loss_weight', 1.0)
         self.teacher_loss_weight = args.get('teacher_loss_weight', 1.0)
         self.teacher_ckpt = args.get('teacher_ckpt', '')
+        self.preservation_cfg = dict(args.get('wp3_preservation', {}))
         if self.train_stage not in {'teacher', 'distill', 'joint'}:
             raise ValueError(f"Unsupported train_stage '{self.train_stage}'")
 
@@ -84,8 +89,28 @@ class PointPillarRadarDistill(nn.Module):
             self._load_teacher_checkpoint(self.teacher_ckpt)
         if self.freeze_teacher and self.train_stage != 'teacher':
             self._freeze_teacher_modules()
+        self.preservation_loss = HeatmapPreservationLoss(
+            self.preservation_cfg,
+            args['radar_head']['class_names_each_head'],
+        )
+        self.radar_anchor = None
+        if self.preservation_loss.enabled:
+            anchor_checkpoint = self.preservation_cfg.get('anchor_checkpoint', '')
+            anchor_sha256 = self.preservation_cfg.get('anchor_sha256', '')
+            if not anchor_checkpoint or not anchor_sha256:
+                raise ValueError(
+                    'enabled AP15 preservation requires anchor_checkpoint and anchor_sha256.'
+                )
+            self.radar_anchor = FrozenRadarAnchor(
+                self.radar_vfe,
+                self.radar_backbone,
+                self.radar_distill,
+                self.radar_head,
+                anchor_checkpoint,
+                anchor_sha256,
+            )
 
-    def _load_teacher_checkpoint(self, ckpt_path):
+    def _load_teacher_checkpoint(self, ckpt_path, initialize_radar=None):
         state_dict = torch.load(ckpt_path, map_location='cpu')
         if isinstance(state_dict, dict) and 'state_dict' in state_dict:
             state_dict = state_dict['state_dict']
@@ -104,7 +129,11 @@ class PointPillarRadarDistill(nn.Module):
             if clean_key.startswith(teacher_prefixes) and clean_key in model_state and model_state[clean_key].shape == value.shape:
                 filtered_state[clean_key] = value
 
-            if not self.init_radar_from_teacher:
+            initialize_radar = (
+                self.init_radar_from_teacher
+                if initialize_radar is None else bool(initialize_radar)
+            )
+            if not initialize_radar:
                 continue
 
             for teacher_prefix, radar_prefix in teacher_to_radar_prefixes.items():
@@ -116,7 +145,20 @@ class PointPillarRadarDistill(nn.Module):
                     filtered_state[radar_key] = value
                 break
 
-        self.load_state_dict(filtered_state, strict=False)
+        # Loading a partial state dict without module metadata makes older
+        # PyTorch BatchNorm loaders synthesize missing num_batches_tracked
+        # entries for unrelated modules. Merge into the complete current state
+        # so restoring the selected LiDAR teacher cannot mutate the E20
+        # student/anchor buffers.
+        model_state.update(filtered_state)
+        self.load_state_dict(model_state, strict=True)
+
+    def reload_selected_lidar_teacher(self):
+        """Restore the selected LiDAR teacher after loading the E20 student."""
+        if not self.teacher_ckpt:
+            raise ValueError('Selected-teacher reload requires a LiDAR checkpoint.')
+        self._load_teacher_checkpoint(self.teacher_ckpt, initialize_radar=False)
+        self._freeze_teacher_modules()
 
     def _freeze_teacher_modules(self):
         for module in (self.lidar_vfe, self.teacher_backbone, self.teacher_bev_backbone, self.teacher_head):
@@ -128,6 +170,8 @@ class PointPillarRadarDistill(nn.Module):
         if self.freeze_teacher and self.train_stage != 'teacher':
             for module in (self.lidar_vfe, self.teacher_backbone, self.teacher_bev_backbone, self.teacher_head):
                 module.eval()
+        if self.radar_anchor is not None:
+            self.radar_anchor.eval()
         return self
 
     @staticmethod
@@ -185,6 +229,11 @@ class PointPillarRadarDistill(nn.Module):
             'compute_loss': compute_loss,
         }
 
+        anchor_pred_dicts = None
+        if self.radar_anchor is not None and (self.training or compute_loss):
+            anchor_pred_dicts = self.radar_anchor(
+                data_dict['radar_points'], batch_dict['gt_boxes'])
+
         batch_dict = self._teacher_forward(batch_dict)
 
         if self.train_stage == 'teacher':
@@ -213,12 +262,27 @@ class PointPillarRadarDistill(nn.Module):
 
             radar_head_loss, radar_tb = self.radar_head.get_loss()
             distill_loss, distill_tb = self.radar_distill.get_loss(batch_dict)
-            total_loss = self.radar_loss_weight * radar_head_loss + self.distill_loss_weight * distill_loss
+            preservation_loss, preservation_tb = self.preservation_loss(
+                batch_dict['radar_pred_dicts'],
+                anchor_pred_dicts,
+                batch_dict['target_dicts'],
+            )
+            weighted_preservation_loss = (
+                self.preservation_loss.loss_weight * preservation_loss
+            )
+            total_loss = (
+                self.radar_loss_weight * radar_head_loss +
+                self.distill_loss_weight * distill_loss +
+                weighted_preservation_loss
+            )
             tb_dict = {
                 'total_loss': total_loss.item(),
                 'radar_head_loss': radar_head_loss.item(),
+                'detection_loss': (self.radar_loss_weight * radar_head_loss).item(),
+                'lidar_kd_loss': (self.distill_loss_weight * distill_loss).item(),
                 **radar_tb,
                 **distill_tb,
+                **preservation_tb,
             }
             output_dict = {
                 'loss': total_loss,
@@ -226,6 +290,8 @@ class PointPillarRadarDistill(nn.Module):
                 'debug_maps': getattr(self.radar_distill, 'debug_maps', {}),
                 'radar_head_loss': radar_head_loss,
                 'distill_loss': distill_loss,
+                'preservation_loss': preservation_loss,
+                'weighted_preservation_loss': weighted_preservation_loss,
                 'final_box_dict': self._select_final_box_dict(batch_dict),
             }
 
